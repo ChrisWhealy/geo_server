@@ -1,0 +1,19 @@
+### Erlang Cowboy App
+# Built with GNU make and https://erlang.mk
+
+.erlang.mk/
+_rel/
+deps/
+ebin/
+
+*.d
+.DS_Store
+
+.eunit
+*.o
+*.beam
+*.plt
+erl_crash.dump
+rel/example_project
+.concrete/DEV_MODE
+.rebar
