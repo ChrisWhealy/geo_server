@@ -77,4 +77,4 @@ This server only returns GeoName records having feature classes set to `A` (Admi
 
 ## Server Performance
 
-Within the server, information about towns and cities is organised alphabetically; therefore, setting the `starts_with` query string parameter set to `true` will return a result much faster because the server knows that it only need search for towns/cities starting with the first letter of the `search_term`.  In this case, towns and cities starting with other letters are simply ignored.
+Within the server, information about towns and cities is organised alphabetically by country; therefore, setting the `starts_with` query string parameter set to `true` will return a result much faster because the server knows that it only need search for towns/cities starting with the first letter of the `search_term`.  In this case, towns and cities starting with other letters are simply ignored.
