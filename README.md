@@ -1,24 +1,24 @@
-# geo_server
+#  geo_server
 
 An Erlang OTP application that accepts a city name as a search criteria, and returns all cities with a matching name.
 
 All geographic information used by this server is obtained from [http://www.geonames.org](http://www.geonames.org).
 
 
-## Deploy to Cloud Foundry
+##  Deploy to Cloud Foundry
 
 Before deploying this app to Cloud Foundry, edit the `manifest.yml` file and change the `route` parameter to point to your own Cloud Foundry server.
 
 ***IMPORTANT***  
 Due to the fact that all the country data is held in memory, this app requires 1600Mb of memory.  This app will probably not start if the memory allowance is reduced.
 
-Deploy to Cloud Foundry using the following community build pack for Erlang
+Deploy to Cloud Foundry using the following community build pack for Erlang:
 
     $ cf push -b https://github.com/ChrisWhealy/cf-buildpack-erlang
 
 ##  API
 
-A client must send an HTTP `GET` request to the app's hostname and the path name `search`:
+A client must send an HTTP `GET` request to the app's hostname with the path `search`:
 
 `geo_server.cfapps.<server>.hana.ondemand.com/search`
 
@@ -32,11 +32,11 @@ For example, to search for all cities containing the string "york" somewhere in 
 
 `<hostname>/search?search_term=york&starts_with=false&whole_word=false`
 
-Similarly, to search for all cities starting the word "london", the URL would be:
+Similarly, to search for all cities starting with the whole word "london", the URL would be:
 
 `<hostname>/search?search_term=york&starts_with=true&whole_word=true`
 
-## Response
+##  Response
 
 The client receives a JSON array containing zero or more instances of a city object.  The example shown here is for Greater London:
 
@@ -54,7 +54,7 @@ The client receives a JSON array containing zero or more instances of a city obj
       "timezone": "Europe/London"
     }
 
-### City Object
+###  City Object
 
 Each city object returned by the server contains the following properties:
 
@@ -71,9 +71,9 @@ Each city object returned by the server contains the following properties:
 | `admin4Txt` | The name of the 4th level administrative region to which this town/city belongs |
 | `timeZone` | The name of the timezone in which this town/city is located |
 
-## Server Behaviour
+##   Server Behaviour
 
-This server only returns GeoName records having feature classes set to `A` (Administrative centres) or `P` (Population Centres).  Also, this server only feature class `P` records (I.E. towns or cities) having a population greater than 500.
+This server only returns GeoName records having feature classes set to `A` (Administrative centres) or `P` (Population Centres).  Also, this server only returns feature class `P` records (I.E. towns or cities) having a population greater than 500.
 
 ## Server Performance
 
