@@ -17,7 +17,7 @@
 
 %% -----------------------------------------------------------------------------
 init(Req, _State) ->
-	%% Switch debug trace on
+	%% Debug trace
 	put(trace, false),
 
 	#{search_term := P1, whole_word := P2, starts_with := P3} = cowboy_req:match_qs(?QS_PARAMETERS, Req),
@@ -41,10 +41,12 @@ init(Req, _State) ->
         _ -> []
       end,
 
-      %% Send query to all started country servers
-      [ Svr#country_server.name ! {query, QS, self()} || Svr <- ServerList ],
+      Ref = make_ref(),
 
-      ResultList = wait_for_results(length(ServerList)),
+      %% Send query to all started country servers
+      [ Svr#country_server.name ! {query, Ref, QS, self()} || Svr <- ServerList ],
+
+      ResultList = wait_for_results(Ref, length(ServerList)),
 
       cowboy_req:reply(200,
         #{<<"content-type">>                => <<"text/json">>,
@@ -73,16 +75,16 @@ init(Req, _State) ->
 %% -----------------------------------------------------------------------------
 
 %% -----------------------------------------------------------------------------
-wait_for_results(N) -> wait_for_results(N,[]).
+wait_for_results(Ref, N) -> wait_for_results(Ref, N, []).
 
-wait_for_results(0, Acc) ->
+wait_for_results(_Ref, 0, Acc) ->
 	?TRACE("Search complete. ~w results received",[length(Acc)]),
 	Acc;
 
-wait_for_results(N, Acc) ->
+wait_for_results(Ref, N, Acc) ->
 	receive
-		{results, ResultList} -> wait_for_results(N-1, Acc ++ ResultList);
-		{error,   Reason}     -> wait_for_results(N-1, Acc ++ Reason)
+		{results, Ref, ResultList} -> wait_for_results(Ref, N-1, Acc ++ ResultList);
+		{error,   Ref, Reason}     -> wait_for_results(Ref, N-1, Acc ++ Reason)
   end.
 
 %% -----------------------------------------------------------------------------
@@ -121,7 +123,7 @@ format_bad_request({search_term, _, whole_word, WW, starts_with, SW}) ->
   "  \"reason\": " ++ list_to_json_array(MsgStr) ++ " }".
 
 format_bad_boolean(_, V) when is_boolean(V) -> ok;
-format_bad_boolean(K, V) -> io_lib:format("Parameter '~p' contains invalid Boolean value '~p'",[K, V]).
+format_bad_boolean(K, V)                    -> io_lib:format("Parameter '~p' contains invalid Boolean value '~p'",[K, V]).
 
 list_to_json_array(L) -> list_to_json_array(L,[]).
 

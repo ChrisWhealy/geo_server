@@ -48,15 +48,15 @@ wait_for_msg(ParentPid, Id, CityList) ->
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Search city list
     %%
-    %% When testing regular expressions in the Erlang REPL, remember the that REPL
-    %% absorbs one level of escape characters, so regul;ar expression
-    %% metacharcters such as \s or \b must be double escaped!
-    {{search_term, Query, whole_word, WholeWord, starts_with, StartsWith}, _CountryCode, Query, CountryServerPid} ->
+    %% When testing regular expressions in the Erlang REPL, remember that the REPL
+    %% absorbs one level of escape characters, so regular expression metacharcters
+    %% such as \s or \b must be double escaped!
+    {Ref, {search_term, Query, whole_word, WholeWord, starts_with, StartsWith}, _CountryCode, Query, CountryServerPid} ->
       ?TRACE("Searching for ~s ~s cities for \"~s\" amongst ~w names",[_CountryCode, Id, Query, length(CityList)]),
       {ok, MatchPattern} = re:compile(make_reg_exp(Query, WholeWord, StartsWith),[unicode, caseless]),
       Results = [C || C <- CityList, regexp_hit(re:run(C#geoname_int.name, MatchPattern))],
 
-      CountryServerPid ! {results, Id, Results},
+      CountryServerPid ! {results, Ref, Id, Results},
       wait_for_msg(CountryServerPid, Id, CityList)
   end.
 

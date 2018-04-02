@@ -12,20 +12,26 @@
 -define(HTTP_REQ_POOL_SIZE,      {max_pipeline_size, 25}).
 
 -include("../include/file_paths.hrl").
+-include("../include/trace.hrl").
 
 %% -----------------------------------------------------------------------------
 %% Start the geo_server application
 %% -----------------------------------------------------------------------------
 start(_Type, _Args) ->
+  put(trace, true),
+  ?TRACE("Application start"),
+  
 	%% Get environment variables
-  % {ok, Env} = application:get_env(env),
+% {ok, Env} = application:get_env(env),
 
   %% Start iBrowse and set connection limits
+  ?TRACE("Starting iBrowse"),
   ibrowse:start(),
   ibrowse:set_dest(?GEONAMES_HOST, 80, [?HTTP_PARALLEL_REQ_LIMIT, ?HTTP_REQ_POOL_SIZE]),
 
   %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 	%% Import and then parse countryInfo.txt from GeoNames.org
+  ?TRACE("Importing country information"),
   spawn(import_files, import_country_info, [self()]),
 
   Countries =
@@ -46,6 +52,7 @@ start(_Type, _Args) ->
 
   {ok, _} = cowboy:start_clear(my_http_listener, [{port, ?PORT}], #{env => #{dispatch => Dispatch}} ),
 
+  ?TRACE("Starting supervisor"),
 	geo_server_sup:start(Countries).
 
 %% -----------------------------------------------------------------------------

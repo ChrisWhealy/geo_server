@@ -33,8 +33,9 @@ init(CC) ->
 start(CC, ServerName) ->
   process_flag(trap_exit, true),
   
-  %% Store my own server name and country code
+  %% Store my own server name, the country_manager's Pid and my country code
   put(my_name, ServerName),
+  put(country_manager_pid, whereis(country_manager)),
   put(cc, CC),
 
   %% Switch trace off for normal operation
@@ -86,33 +87,18 @@ start(CC, ServerName) ->
 %% -----------------------------------------------------------------------------
 %% If the CityServerList is empty, then either this country has no cities with
 %% populations large enough to appear in a search, or all the city servers have
-%% shut down.  Therefore, the country server should also shut down
+%% shut down.  Either way, the country server should also shut down
 wait_for_msg([], _) ->
   exit({no_cities, get(my_name)});
 
 wait_for_msg(CityServerList, FeatureClassA) ->
   CityServerList1 = receive
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    %% Termination messages from child processes
-    {'EXIT', CityServerPid, Reason} ->
-      %% Is the pid that just shut down the hierarchy server?
-      case get(hierarchy_server_pid) == CityServerPid of
-        %% Yup, hierarchy server shutdown does not need to be reported
-        true ->
-          CityServerList;
+    %% Termination messages
 
-        %% Nope, so one of the city servers must have died
-        false ->
-          CityServerId = get_child_id(CityServerPid, CityServerList),
-
-          case Reason of
-            normal -> ok;
-            _      -> io:format("~p (~p) terminated with reason ~p~n", [CityServerId, CityServerPid, Reason])
-          end,
-
-          lists:keydelete(CityServerPid, 2, CityServerList)
-      end;
-
+    %% Handle process exit
+    {'EXIT', SomePid, Reason} ->
+      handle_exit(SomePid, Reason, CityServerList);
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Server commands
@@ -143,9 +129,9 @@ wait_for_msg(CityServerList, FeatureClassA) ->
         
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Query
-    {query, {search_term, Query, whole_word, _, starts_with, _} = QS, RequestHandlerPid} ->
+    {query, Ref, {search_term, Query, whole_word, _, starts_with, _} = QS, RequestHandlerPid} ->
       ?TRACE("Country server ~s (~p) received query \"~s\" from request handler ~p", [get(cc), self(), Query, RequestHandlerPid]),
-      RequestHandlerPid ! handle_query(CityServerList, QS),
+      RequestHandlerPid ! handle_query(Ref, CityServerList, QS),
       CityServerList
 
   end,
@@ -163,50 +149,45 @@ wait_for_msg(CityServerList, FeatureClassA) ->
 %% Wait for responses from city servers
 
 %% Response from last city server
-wait_for_results(0, ResultList) ->
+wait_for_results(Ref, 0, ResultList) ->
   ?TRACE("Country ~s search complete: found ~w results", [get(cc), length(ResultList)]),
-  {results, ResultList};
+  {results, Ref, ResultList};
 
-%% Response from city server 
-wait_for_results(N, ResultList) ->
+%% Responses from city servers
+wait_for_results(Ref, N, ResultList) ->
   ?TRACE("Country server ~s waiting for ~w more results", [get(cc), N]),
 
   ResultList1 = ResultList ++ receive
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Response from city server - which might be an empty list
-    {results, _Id, SearchResults} ->
+    {results, Ref, _Id, SearchResults} ->
       case length(SearchResults) of
         0 -> ?TRACE("No match in ~s for letter ~c",[get(cc), _Id]);
         L -> ?TRACE("Found ~w results in ~s",[L, get(cc)])
       end,
 
-      SearchResults;
-
-    Whatever ->
-      io:format("Country server ~s received an unexpected message ~p~n",[get(cc), Whatever]),
-      []
+      SearchResults
   end,
 
-  wait_for_results(N-1, ResultList1).
+  wait_for_results(Ref, N-1, ResultList1).
 
 
 
 %% -----------------------------------------------------------------------------
 %% Handle query from client
+
 %% If the starts_with parameter is false, then the "contains" search option has
-%% been selected.  Therefore, the query myst be sent to all city servers for
+%% been selected.  Therefore, the query must be sent to all city servers for
 %% this country
-handle_query(CityServerList, {search_term, Query, whole_word, _, starts_with, false} = QS) ->
+handle_query(Ref, CityServerList, {search_term, Query, whole_word, _, starts_with, false} = QS) ->
   ?TRACE("Sending query to all city servers"),
-  send_query_to_all(CityServerList, {QS, get(cc), Query, self()}),
-  wait_for_results(length(CityServerList), []);
+  send_query_to_all(CityServerList, {Ref, QS, get(cc), Query, self()}),
+  wait_for_results(Ref, length(CityServerList), []);
 
 
-%% -----------------------------------------------------------------------------
-%% Handle query from client
 %% If the starts_with parameter is true, then query need only be sent to the
 %% city server handling cities starting with the first letter of the search term
-handle_query(CityServerList, {search_term, [Char1 | _] = Query, whole_word, _, starts_with, true} = QS) ->
+handle_query(Ref, CityServerList, {search_term, [Char1 | _] = Query, whole_word, _, starts_with, true} = QS) ->
   Id = string:uppercase([Char1]),
 
   %% Do we have a child process for the first letter of this query?
@@ -214,16 +195,52 @@ handle_query(CityServerList, {search_term, [Char1 | _] = Query, whole_word, _, s
     %% Yup, so pass query down to the relevant child process
     {pid, ChildPid, id, Id} ->
       ?TRACE("Sending query to ~s city server for letter ~s",[get(cc), Id]),
-      ChildPid ! {QS, get(cc), Query, self()},
-      wait_for_results(1, []);
+      ChildPid ! {Ref, QS, get(cc), Query, self()},
+      wait_for_results(Ref, 1, []);
 
     %% Nope, so ignore query
     false ->
       ?TRACE("Country ~s has no city server for letter ~s", [get(cc), Id]),
-      {results, []}
+      {results, Ref, []}
 
   end.
 
+
+%% -----------------------------------------------------------------------------
+%% Handle EXIT messages.
+%% This function must return some version of the CityServerList
+handle_exit(SomePid, Reason, CityServerList) ->
+  %% Has the country_manager shut down?
+  case pids_are_equal(get(country_manager_pid), SomePid) of
+    %% Yup, so shut down all the city servers (which in turn, will cause this
+    %% country_server to shut down with reason 'no_cities')
+    true ->
+      send_cmd_to_all(CityServerList, shutdown),
+      CityServerList;
+
+    %% Nope, the country_manager is still alive
+    false ->
+      %% Has the hierarchy server shutdown?
+      case pids_are_equal(get(hierarchy_server_pid), SomePid) of
+        %% Yup.  That's fine, this does not need to be reported
+        true ->
+          CityServerList;
+
+        false ->
+          %% Nope, so it must be a city server that's died
+          CityServerId = get_child_id(SomePid, CityServerList),
+
+          case Reason of
+            normal -> ok;
+            _      -> io:format("~p (~p) terminated with reason ~p~n", [CityServerId, SomePid, Reason])
+          end,
+    
+          lists:keydelete(SomePid, 2, CityServerList)
+      end
+  end.
+
+pids_are_equal(_Pid, _Pid) -> true;
+pids_are_equal(_Pid, _)   -> false.
 
 %% -----------------------------------------------------------------------------
 %% Create a child process to handle the cities belonging to successive letters
@@ -262,8 +279,16 @@ distribute_cities([C | Rest], CityServerList) ->
 
 %% -----------------------------------------------------------------------------
 %% Send either a command or a query to all children
-send_cmd_to_all(CityServerList, Cmd)            -> lists:foreach(fun({pid, Pid, id, _}) -> Pid ! {cmd, Cmd} end, CityServerList).
-send_query_to_all(CityServerList, QueryDetails) -> lists:foreach(fun({pid, Pid, id, _}) -> Pid ! QueryDetails end, CityServerList).
+send_cmd_to_all(CityServerList, Cmd) ->
+  lists:foreach(fun({pid, Pid, id, _}) -> Pid ! {cmd, Cmd} end, CityServerList).
+
+send_query_to_all(CityServerList, QueryDetails) ->
+  lists:foreach(
+    fun({pid, Pid, id, _}) ->
+      Pid ! QueryDetails
+    end,
+    CityServerList
+  ).
 
 
 
@@ -278,8 +303,8 @@ format_proc_list([{pid, Pid, id, Id} | Rest], Acc) -> format_proc_list(Rest, Acc
 
 %% -----------------------------------------------------------------------------
 %% Get child process id.  Returns an atom
-get_child_id(CityServerPid, CityServerList) ->
-  case lists:keyfind(CityServerPid, 2, CityServerList) of
+get_child_id(SomePid, CityServerList) ->
+  case lists:keyfind(SomePid, 2, CityServerList) of
     {pid, _, id, Id} -> list_to_atom(Id);
     false            -> unknown_city_server_pid
   end.
