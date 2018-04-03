@@ -83,6 +83,6 @@ This server only returns GeoName records having feature classes set to `A` (Admi
 
 ## Server Performance
 
-Within the server, there is a child server for each country listed in the [http://download.geonames.org/export/dump/countryInfo.txt](GeoNames countryInfo.txt) file.
+Within the server, there is a child server for each country listed in the [GeoNames countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt) file.
 
 Within each country server, town and city information is divided up amongst a set of dedicated child processes according to the first character of the town/city's name; therefore, setting the `starts_with` query string parameter to `true` will return a result set much faster because each country server knows it need only send the query to the child process dedicated to handling towns/cities starting with the first letter of the `search_term`.
