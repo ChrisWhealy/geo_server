@@ -4,13 +4,19 @@ An Erlang OTP application that accepts a city name as a search criteria, and ret
 
 All geographic information used by this server is obtained from [http://www.geonames.org](http://www.geonames.org).
 
+## Clone Git Repository
+
+Clone this Git repository onto your local machine
+
+    $ git clone https://github.wdf.sap.corp/I003638/geo_server.git
+
+Then edit the `manifest.yml` file and change the `route` parameter to point to your own Cloud Foundry server.
+
 
 ##  Deploy to Cloud Foundry
 
-Before deploying this app to Cloud Foundry, edit the `manifest.yml` file and change the `route` parameter to point to your own Cloud Foundry server.
-
 ***IMPORTANT***  
-Due to the fact that all the country data is held in memory, this app requires 1600Mb of memory.  This app will probably not start if the memory allowance is reduced.
+Due to the fact that all the geographic information used by this server is held in memory, it requires 1600Mb of memory.  This server will probably not start if this memory allowance is reduced.
 
 Deploy to Cloud Foundry using the following community build pack for Erlang:
 
@@ -77,4 +83,6 @@ This server only returns GeoName records having feature classes set to `A` (Admi
 
 ## Server Performance
 
-Within the server, there is a child server for each country.  Within each country server, information about the towns and cities is organised alphabetically; therefore, setting the `starts_with` query string parameter to `true` will return a result much faster because each country server knows it can ignore all towns/cities starting with some letter other than the first letter of the `search_term`.
+Within the server, there is a child server for each country listed in the [http://download.geonames.org/export/dump/countryInfo.txt](GeoNames countryInfo.txt) file.
+
+Within each country server, town and city information is divided up amongst a set of dedicated child processes according to the first character of the town/city's name; therefore, setting the `starts_with` query string parameter to `true` will return a result set much faster because each country server knows it need only send the query to the child process dedicated to handling towns/cities starting with the first letter of the `search_term`.
