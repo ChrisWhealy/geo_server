@@ -1,7 +1,7 @@
 -module(country_manager).
 
 -author("Chris Whealy <chris.whealy@sap.com>").
--revision("Revision: 0.1").
+-revision("Revision: 1.0.0").
 -created("Date: 2018/03/02 09:22:03").
 -created_by("chris.whealy@sap.com").
 
@@ -138,7 +138,7 @@ wait_for_msgs(ServerStatusList) ->
       ServerStatusList;
 
     %% -------------------------------------------------------------------------
-    %% Status commmands either from the console or the request handler
+    %% Status commmands either from the console or some request handler
     {cmd, status} ->
       format_server_status_list(ServerStatusList, all),
 
@@ -154,7 +154,7 @@ wait_for_msgs(ServerStatusList) ->
       format_server_status_list(ServerList, Status),
       ServerStatusList;
 
-    {cmd, status, CC} ->
+    {cmd, status, CC} when length(CC) == 2 ->
       ThisCountryServer = ?COUNTRY_SERVER_NAME(CC),
 
       case whereis(ThisCountryServer) of
@@ -166,6 +166,11 @@ wait_for_msgs(ServerStatusList) ->
           format_server_status_list([Rec], ThisCountryServer)
       end,
 
+      ServerStatusList;
+
+    {cmd, status, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+      ?TRACE("Sending server status to ~p",[RequestHandlerPid]),
+      RequestHandlerPid ! ServerStatusList,
       ServerStatusList;
 
     {cmd, status, started, RequestHandlerPid} ->
@@ -205,6 +210,12 @@ wait_for_msgs(ServerStatusList) ->
   end,
 
   wait_for_msgs(ServerStatusList1).
+
+
+%% -----------------------------------------------------------------------------
+%%                           P R I V A T E   A P I
+%% -----------------------------------------------------------------------------
+
 
 %% -----------------------------------------------------------------------------
 %% Update status of a given server without time stamp

@@ -1,7 +1,7 @@
 -module(country_hierarchy).
 
 -author("Chris Whealy <chris.whealy@sap.com>").
--revision("Revision: 0.1").
+-revision("Revision: 1.0.0").
 -created("Date: 2018/02/16 14:15:02").
 -created_by("chris.whealy@sap.com").
 

@@ -25,7 +25,7 @@
 -define(TRACE(FStr,Params), 
   (fun(F, P) ->
      case get(trace) of
-       true -> io:fwrite("~s" ++ F ++ "~n", [?FUNCTION_SIG] ++ P);
+       true -> io:fwrite("~s " ++ F ++ "~n", [?FUNCTION_SIG] ++ P);
        _    -> no_trace
      end
    end

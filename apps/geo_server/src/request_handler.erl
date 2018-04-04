@@ -1,6 +1,11 @@
 -module(request_handler).
 -behavior(cowboy_handler).
 
+-author("Chris Whealy <chris.whealy@sap.com>").
+-revision("Revision: 1.0.0").
+-created("Date: 2018/02/03 10:45:47").
+-created_by("chris.whealy@sap.com").
+
 -export([init/2]).
 
 -include("../include/trace.hrl").

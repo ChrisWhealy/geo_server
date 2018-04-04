@@ -1,7 +1,7 @@
 -module(city_server).
 
 -author("Chris Whealy <chris.whealy@sap.com>").
--revision("Revision: 0.1").
+-revision("Revision: 1.0.0").
 -created("Date: 2018/02/19 17:31:51").
 -created_by("chris.whealy@sap.com").
 

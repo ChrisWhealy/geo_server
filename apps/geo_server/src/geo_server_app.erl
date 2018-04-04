@@ -1,12 +1,15 @@
 -module(geo_server_app).
 -behaviour(application).
 
+-author("Chris Whealy <chris.whealy@sap.com>").
+-revision("Revision: 1.0.0").
+-created("Date: 2018/02/02 13:15:19").
+-created_by("chris.whealy@sap.com").
+
 -export([
     start/2
 	, stop/1
 ]).
-
--define(PORT, 8080).
 
 -define(HTTP_PARALLEL_REQ_LIMIT, {max_sessions,      10}).
 -define(HTTP_REQ_POOL_SIZE,      {max_pipeline_size, 25}).
@@ -22,10 +25,14 @@ start(_Type, _Args) ->
   ?TRACE("Application start"),
   
 	%% Get environment variables
-% {ok, Env} = application:get_env(env),
+  Port = case os:getenv("PORT") of
+    false -> ?TRACE("Environment variable PORT not set.  Defaulting to 8080"), 8080;
+    P     -> {Int,_} = string:to_integer(P), Int
+  end,
+
 
   %% Start iBrowse and set connection limits
-  ?TRACE("Starting iBrowse"),
+  ?TRACE("Starting iBrowse for connecting to GeoNames.org"),
   ibrowse:start(),
   ibrowse:set_dest(?GEONAMES_HOST, 80, [?HTTP_PARALLEL_REQ_LIMIT, ?HTTP_REQ_POOL_SIZE]),
 
@@ -38,19 +45,24 @@ start(_Type, _Args) ->
 		receive
 			{country_list, L} -> L;
 			{error, Reason}   -> exit({error, Reason}), []
-		end,
+    end,
+
+  % Test server with only one country
+  % Countries = ["GB"],
 
   %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   %% Define routes
   Dispatch = cowboy_router:compile([
 		{'_', [
 			{"/",            default_handler, []}
+     ,{"/server_info", server_info_handler, []}
      ,{"/client_info", client_info_handler, []}
      ,{"/search",      request_handler, []}
 		]}
 	]),
 
-  {ok, _} = cowboy:start_clear(my_http_listener, [{port, ?PORT}], #{env => #{dispatch => Dispatch}} ),
+  ?TRACE("Starting Cowboy server on port ~w",[Port]),
+  cowboy:start_clear(my_http_listener, [{port, Port}], #{env => #{dispatch => Dispatch}}),
 
   ?TRACE("Starting supervisor"),
 	geo_server_sup:start(Countries).

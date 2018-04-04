@@ -1,7 +1,7 @@
 -module(import_files).
 
 -author("Chris Whealy <chris.whealy@sap.com>").
--revision("Revision: 0.1").
+-revision("Revision: 1.0.0").
 -created("Date: 2018/02/08 11:15:07").
 -created_by("chris.whealy@sap.com").
 
@@ -42,7 +42,7 @@
 %% Import the country info file and send list of countries back to the application
 import_country_info(ApplicationPid) -> 
   %% Assume that trace output is switched off
-  put(trace, false),
+  put(trace, true),
 
   {ok, PWD} = file:get_cwd(),
   ?TRACE("Present working directory is ~s", [PWD]),
@@ -105,20 +105,15 @@ file_age(Filename) ->
     T -> T
   end,
 
-  %% Find time difference between flie last modified time and now
+  %% Find time difference between the file's last modified time and now
   %% Convert standard DateTime to custom DateTime format by adding microseconds
   time_diff(?NOW, {Date,{H,M,S,0}}).
 
 %% -----------------------------------------------------------------------------
-%% Wait for a resource to be returned by HTTP request
-wait_for_resources(Count, text) ->
-  ?TRACE("Waiting for ~w text resources~n",[Count]),
-  wait_for_resources(Count, write_file, []);
-  
-wait_for_resources(Count, zip)  ->
-  ?TRACE("Waiting for ~w zip resources~n",[Count]),
-  wait_for_resources(Count, handle_zip_file, []).
-  
+%% Wait for a resource to be returned by the current HTTP request
+wait_for_resources(Count, text) -> wait_for_resources(Count, write_file, []);
+wait_for_resources(Count, zip)  -> wait_for_resources(Count, handle_zip_file, []).
+
 wait_for_resources(0,    _Fun, RetryList) -> RetryList;
 wait_for_resources(Count, Fun, RetryList) ->
   RetryList1 = receive
@@ -155,6 +150,9 @@ wait_for_resources(Count, Fun, RetryList) ->
         {other, req_timedout} ->
           io:format("Error: Request timed out for ~s~s~n", [?GEONAMES_URL ++ Filename, Ext]);
       
+        {other, {conn_failed, {error, _Reason}}} ->
+          io:format("Error: Connection to ~s~s failed.  Host is down or unreachable.~n", [?GEONAMES_URL ++ Filename, Ext]);
+      
         {other, Reason} ->
           io:format("Error: ~w requesting ~s~s~n", [Reason, ?GEONAMES_URL ++ Filename, Ext])
       end,
@@ -170,28 +168,17 @@ wait_for_resources(Count, Fun, RetryList) ->
 %% Unzip only the data file from a zipped country file, then throw away the ZIP
 %% file.
 handle_zip_file(Dir, File, Ext, Body) ->
-  ?TRACE("Country file ~s in directory ~s with content length ~w",[File, Dir, length(Body)]),
-
   ZipFile = Dir ++ File ++ Ext,
   TxtFile = Dir ++ File ++ ".txt",
-  IntFile = Dir ++ File ++ "_int.txt",
 
   ?TRACE("Writing ZIP file ~s",[ZipFile]),
-  
   write_file(Dir, File, Ext, Body),
   
   ?TRACE("Unzipping ~s to create ~s",[ZipFile, TxtFile]),
-
   {ok, [TxtFile]} = zip:unzip(ZipFile, [{file_list, [File ++ ".txt"]}, {cwd, Dir}]),
 
-  %% If the ZIP file has an associated "_int.txt" file, delete that also
-  case file:delete(IntFile) of
-    ok         -> ok;
-    {error, _} -> meh
-  end,
-
-  ok = file:delete(ZipFile).
-
+  %% Delete the ZIP file
+  file:delete(ZipFile).
 
 
 %% -----------------------------------------------------------------------------
@@ -266,9 +253,9 @@ country_file(CC, FCP_Filesize) ->
   FCA_Filesize = filelib:file_size(FCA_Filename),
 
   ?TRACE("Importing ~s from internal FCA country file ~s",[format_as_binary_units(FCA_Filesize), FCA_Filename]),
-  FCA_File = read_internal_country_file(file:read_file(FCA_Filename)),
-
   ?TRACE("Importing ~s from internal FCP country file ~s",[format_as_binary_units(FCP_Filesize), FCP_Filename]),
+
+  FCA_File = read_internal_country_file(file:read_file(FCA_Filename)),
   FCP_File = read_internal_country_file(file:read_file(FCP_Filename)),
 
   % Restructure response to be consistent with country_file/3
@@ -286,7 +273,7 @@ country_file(CC, {error, Reason}, _) ->
 
 %% -----------------------------------------------------------------------------
 %% Read internal FCA or FCP country files
-read_internal_country_file({ok, Data})      -> parse_internal_country_file(Data);
+read_internal_country_file({ok, BinData})   -> parse_internal_country_file(BinData);
 read_internal_country_file({error, Reason}) -> {error, Reason}.
 
 
