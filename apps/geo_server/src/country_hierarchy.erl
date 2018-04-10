@@ -10,7 +10,7 @@
   , start/1
 ]).
 
--include("../include/geoname.hrl").
+-include("../include/rec_geoname.hrl").
 
 %% -----------------------------------------------------------------------------
 %%                             P U B L I C   A P I
@@ -18,11 +18,13 @@
 
 %% -----------------------------------------------------------------------------
 %% Initialise the country hierarchy server
-init(MyName, FCA) -> register(MyName, spawn_link(?MODULE, start, [FCA])).
+init(MyName, FCA) ->
+  register(MyName, spawn_link(?MODULE, start, [FCA])).
 
 %% -----------------------------------------------------------------------------
 %% Start the country hierarchy server
-start(FCA) -> wait_for_msg(seperate_admin_codes(FCA)).
+start(FCA) ->
+  wait_for_msg(seperate_admin_codes(FCA)).
 
 %% -----------------------------------------------------------------------------
 wait_for_msg(AdminLists) ->
@@ -34,7 +36,8 @@ wait_for_msg(AdminLists) ->
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Commands from country server
-    {cmd, stop} -> exit(normal)
+    {cmd, stop} ->
+      exit(normal)
 
   end,
 
@@ -62,11 +65,11 @@ seperate_admin_codes([], Acc) -> Acc;
 
 seperate_admin_codes([FCARec | Rest], {A1, A2, A3, A4}) ->
   AdminLists = case FCARec#geoname_int.feature_code of
-    "ADM1" -> {A1 ++ [FCARec], A2, A3, A4};
-    "ADM2" -> {A1, A2 ++ [FCARec], A3, A4};
-    "ADM3" -> {A1, A2, A3 ++ [FCARec], A4};
-    "ADM4" -> {A1, A2, A3, A4 ++ [FCARec]};
-    _      -> {A1, A2, A3, A4}
+    <<"ADM1">> -> {A1 ++ [FCARec], A2, A3, A4};
+    <<"ADM2">> -> {A1, A2 ++ [FCARec], A3, A4};
+    <<"ADM3">> -> {A1, A2, A3 ++ [FCARec], A4};
+    <<"ADM4">> -> {A1, A2, A3, A4 ++ [FCARec]};
+    _          -> {A1, A2, A3, A4}
   end,
 
   seperate_admin_codes(Rest, AdminLists).

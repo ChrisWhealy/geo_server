@@ -31,7 +31,7 @@ start(_Type, _Args) ->
   end,
 
 
-  %% Start iBrowse and set connection limits
+  %% Start iBrowse and set parallel connection limit
   ?TRACE("Starting iBrowse for connecting to GeoNames.org"),
   ibrowse:start(),
   ibrowse:set_dest(?GEONAMES_HOST, 80, [?HTTP_PARALLEL_REQ_LIMIT, ?HTTP_REQ_POOL_SIZE]),
@@ -47,17 +47,15 @@ start(_Type, _Args) ->
 			{error, Reason}   -> exit({error, Reason}), []
     end,
 
-  % Test server with only one country
-  % Countries = ["GB"],
-
   %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   %% Define routes
   Dispatch = cowboy_router:compile([
 		{'_', [
-			{"/",            default_handler, []}
+			{"/",            default_handler,     []}
      ,{"/server_info", server_info_handler, []}
+     ,{"/server_cmd",  server_cmd_handler,  []}
      ,{"/client_info", client_info_handler, []}
-     ,{"/search",      request_handler, []}
+     ,{"/search",      request_handler,     []}
 		]}
 	]),
 

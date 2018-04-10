@@ -9,8 +9,8 @@
 -export([init/2]).
 
 -include("../include/trace.hrl").
--include("../include/geoname.hrl").
--include("../include/country_server.hrl").
+-include("../include/rec_geoname.hrl").
+-include("../include/rec_country_server.hrl").
 
 -define(SERVER_NAME(Cc), list_to_atom("country_server_" ++ string:lowercase(Cc))).
 
@@ -31,7 +31,6 @@ init(Req, _State) ->
 	      whole_word,  binary_to_atom(P2, latin1),
         starts_with, binary_to_atom(P3, latin1)},
         
-  ?TRACE("~c* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *",[$\n]),
   ?TRACE("~p", [QS]),
 
   % Are the query string parameters valid?
@@ -56,7 +55,7 @@ init(Req, _State) ->
       cowboy_req:reply(200,
         #{<<"content-type">>                => <<"text/json">>,
           <<"access-control-allow-origin">> => <<"http://localhost:12345">>},
-        list_to_binary(geoname_to_json(ResultList)),
+        geoname_to_json(ResultList),
         Req);
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -64,7 +63,7 @@ init(Req, _State) ->
       cowboy_req:reply(400,
         #{<<"content-type">>                => <<"text/json">>,
           <<"access-control-allow-origin">> => <<"http://localhost:12345">>},
-        list_to_binary(format_bad_request(QS)),
+        format_bad_request(QS),
         Req)
 
   end,
@@ -93,26 +92,30 @@ wait_for_results(Ref, N, Acc) ->
   end.
 
 %% -----------------------------------------------------------------------------
-%% Convert a geoname_int record to a JSON string
+%% Convert a geoname_int record to a JSON string in binary format
 geoname_to_json(GeonameList) -> geoname_to_json(GeonameList, []).
 
-geoname_to_json([], Acc)         -> "[" ++ lists:flatten(lists:join(",", Acc)) ++ "]";
+geoname_to_json([], Acc) ->
+  << <<"[">>/binary, (list_to_binary(lists:flatten(lists:join(<<",">>, Acc))))/binary, <<"]">>/binary >>;
+
 geoname_to_json([G | Rest], Acc) ->
-	JsonStr = "{ \"name\": \""       ++ G#geoname_int.name ++ "\", "
-	          "\"lat\": "            ++ G#geoname_int.latitude ++ ", "
-	          "\"lng\": "            ++ G#geoname_int.longitude ++ ", "
-	          "\"featureClass\": \"" ++ G#geoname_int.feature_class ++ "\", "
-	          "\"featureCode\": \""  ++ G#geoname_int.feature_code ++ "\", "
-	          "\"countryCode\": \""  ++ G#geoname_int.country_code ++ "\", "
-	          "\"admin1Txt\": \""    ++ val_or_null(G#geoname_int.admin1_txt) ++ "\", "
-	          "\"admin2Txt\": \""    ++ val_or_null(G#geoname_int.admin2_txt) ++ "\", "
-	          "\"admin3Txt\": \""    ++ val_or_null(G#geoname_int.admin3_txt) ++ "\", "
-	          "\"admin4Txt\": \""    ++ val_or_null(G#geoname_int.admin4_txt) ++ "\", "
-						"\"timezone\": \""     ++ G#geoname_int.timezone ++ "\" }",
+	JsonBin =
+  << <<"{ \"name\": \"">>/binary,       (G#geoname_int.name)/binary,                     <<"\", ">>/binary
+	 , <<"\"lat\": ">>/binary,            (G#geoname_int.latitude)/binary,                 <<", ">>/binary
+	 , <<"\"lng\": ">>/binary,            (G#geoname_int.longitude)/binary,                <<", ">>/binary
+	 , <<"\"featureClass\": \"">>/binary, (G#geoname_int.feature_class)/binary,            <<"\", ">>/binary
+	 , <<"\"featureCode\": \"">>/binary,  (G#geoname_int.feature_code)/binary,             <<"\", ">>/binary
+	 , <<"\"countryCode\": \"">>/binary,  (G#geoname_int.country_code)/binary,             <<"\", ">>/binary
+	 , <<"\"admin1Txt\": \"">>/binary,    (val_or_null(G#geoname_int.admin1_txt))/binary,  <<"\", ">>/binary
+	 , <<"\"admin2Txt\": \"">>/binary,    (val_or_null(G#geoname_int.admin2_txt))/binary,  <<"\", ">>/binary
+	 , <<"\"admin3Txt\": \"">>/binary,    (val_or_null(G#geoname_int.admin3_txt))/binary,  <<"\", ">>/binary
+	 , <<"\"admin4Txt\": \"">>/binary,    (val_or_null(G#geoname_int.admin4_txt))/binary,  <<"\", ">>/binary
+   , <<"\"timezone\": \"">>/binary,     (G#geoname_int.timezone)/binary,                 <<"\" }">>/binary
+  >>,
 
-	geoname_to_json(Rest, Acc ++ [JsonStr]).
+	geoname_to_json(Rest, Acc ++ [JsonBin]).
 
-val_or_null(undefined) -> "null";
+val_or_null(undefined) -> <<"null">>;
 val_or_null(Val)       -> Val.
 
 %% -----------------------------------------------------------------------------
@@ -121,17 +124,19 @@ validate_qs_parms({search_term, _, whole_word, WW, starts_with, SW}) ->
   is_boolean(WW) and is_boolean(SW).
 
 format_bad_request({search_term, _, whole_word, WW, starts_with, SW}) ->
-  MsgStr = [format_bad_boolean(whole_word, WW),
-            format_bad_boolean(starts_with, SW)],
+  MsgStr = list_to_json_array([format_bad_boolean(whole_word, WW),
+                               format_bad_boolean(starts_with, SW)]),
 
-  "{ \"error\": \"Bad request\","
-  "  \"reason\": " ++ list_to_json_array(MsgStr) ++ " }".
+  << <<"{ \"error\": \"Bad request\", \"reason\": ">>/binary
+   , (list_to_binary(MsgStr))/binary
+   , <<" }">>/binary
+  >>.
 
 format_bad_boolean(_, V) when is_boolean(V) -> ok;
 format_bad_boolean(K, V)                    -> io_lib:format("Parameter '~p' contains invalid Boolean value '~p'",[K, V]).
 
 list_to_json_array(L) -> list_to_json_array(L,[]).
 
-list_to_json_array([], Acc)            -> "[" ++ string:join(Acc, ",") ++ "]";
+list_to_json_array([], Acc)            -> lists:flatten("[" ++ string:join(Acc, ",") ++ "]");
 list_to_json_array([ok | Tail], Acc)   -> list_to_json_array(Tail, Acc);
 list_to_json_array([Head | Tail], Acc) -> list_to_json_array(Tail, Acc ++ ["\"" ++ Head ++ "\""]).

@@ -11,22 +11,25 @@
 ]).
 
 -include("../include/trace.hrl").
--include("../include/geoname.hrl").
+-include("../include/rec_geoname.hrl").
 -include("../include/file_paths.hrl").
 -include("../include/now.hrl").
 
 %% -----------------------------------------------------------------------------
-%%                             P U B L I C   A P I
+%%                             P U B L I FCP_Rec   A P I
 %% -----------------------------------------------------------------------------
 
 
 %% -----------------------------------------------------------------------------
 %% Initialise the country server
-init(CC) ->
-  ServerName = list_to_atom("country_server_" ++ string:lowercase(CC)),
-  CountryServerPid = spawn_link(?MODULE, start, [CC, ServerName]),
-  register(ServerName, CountryServerPid),
-  CountryServerPid.
+%% We could be passed either the two character country code as a string, or
+%% the name of server as an atom depending on where the start command came from
+init(CC) when is_list(CC) ->
+  do_init(list_to_atom("country_server_" ++ string:lowercase(CC)));
+
+init(CC) when is_atom(CC) ->
+  do_init(CC).
+
 
 %% -----------------------------------------------------------------------------
 %% Start the country server
@@ -52,7 +55,7 @@ start(CC, ServerName) ->
   filelib:ensure_dir(TargetDir),
   import_files:check_for_update(CC),
 
-  {FeatureClassA, CityServerList} = case import_files:country_file(CC) of
+  {FeatureClassA, CityServerList} = case country_file_handler:country_file(CC) of
     {fca, FCA_Response, fcp, FCP_Response} ->
       %% Check for errors importing internal FCA file
       FCA = case FCA_Response of
@@ -65,8 +68,6 @@ start(CC, ServerName) ->
         {error, FCP_Reason} -> exit({fcp_country_file_error, FCP_Reason});
         FCP_Data            -> FCP_Data
       end,
-
-      country_manager ! {starting, file_import, ServerName, complete},
 
       {FCA, distribute_cities(FCP)};
 
@@ -85,11 +86,38 @@ start(CC, ServerName) ->
 
 
 %% -----------------------------------------------------------------------------
+%%                            P R I V A T E   A P I
+%% -----------------------------------------------------------------------------
+
+%% -----------------------------------------------------------------------------
+%% Internal startup function
+do_init(ServerName) ->
+  %% Has this country server already been registered?
+  case whereis(ServerName) of
+    undefined ->
+      CC = extract_cc(ServerName),
+      CountryServerPid = spawn_link(?MODULE, start, [CC, ServerName]),
+      register(ServerName, CountryServerPid),
+      CountryServerPid;
+
+    SomePid ->
+      SomePid
+  end.
+
+%% -----------------------------------------------------------------------------
 %% If the CityServerList is empty, then either this country has no cities with
 %% populations large enough to appear in a search, or all the city servers have
 %% shut down.  Either way, the country server should also shut down
 wait_for_msg([], _) ->
-  exit({no_cities, get(my_name)});
+  put(trace, true),
+
+  Reason = case get(shutdown) of
+    undefined -> no_cities;
+    _         -> stopped
+  end,
+
+  ?TRACE("No city servers: ~p",[Reason]),
+  exit({Reason, get(my_name)});
 
 wait_for_msg(CityServerList, FeatureClassA) ->
   CityServerList1 = receive
@@ -102,6 +130,27 @@ wait_for_msg(CityServerList, FeatureClassA) ->
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Server commands
+    
+    %% Commands sent to all city servers
+    {cmd, Cmd} ->
+      case Cmd of
+        city_list  -> send_cmd_to_all(CityServerList, city_list);
+        city_stats -> send_cmd_to_all(CityServerList, city_stats);
+
+        shutdown   ->
+          put(shutdown, true),
+          send_cmd_to_all(CityServerList, shutdown);
+
+        trace_on   -> put(trace, true),  send_cmd_to_all(CityServerList, trace_on);
+        trace_off  -> put(trace, false), send_cmd_to_all(CityServerList, trace_off);
+
+        child_list -> io:format("Country server ~s uses child processes~n~s~n",[get(cc), format_proc_list(CityServerList)]);
+        _          -> io:format("~s received unknown command ~p~n",[get(my_name), Cmd])
+      end,
+      
+      CityServerList;
+    
+    %% Commands sent to a specific city server
     {cmd, city_list, Id} ->
       Id1 = string:uppercase(Id),
 
@@ -112,21 +161,12 @@ wait_for_msg(CityServerList, FeatureClassA) ->
 
       CityServerList;
 
-    {cmd, Cmd} ->
-      case Cmd of
-        city_list  -> send_cmd_to_all(CityServerList, city_list);
-        city_stats -> send_cmd_to_all(CityServerList, city_stats);
-        shutdown   -> send_cmd_to_all(CityServerList, shutdown);
-
-        trace_on   -> put(trace, true),  send_cmd_to_all(CityServerList, trace_on);
-        trace_off  -> put(trace, false), send_cmd_to_all(CityServerList, trace_off);
-
-        child_list -> io:format("Country server ~s uses child processes~n~s~n",[get(cc), format_proc_list(CityServerList)]);
-        _          -> io:format("~s received unknown command ~p~n",[get(my_name), Cmd])
-      end,
-      
+    %% Commands from the server_info handler
+    {cmd, city_count, RequestHandlerPid} ->
+      ?TRACE("City count requested by ~p.  Returning ~w",[RequestHandlerPid, get(city_count)]),
+      RequestHandlerPid ! {city_count, get(city_count)},
       CityServerList;
-        
+
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Query
     {query, Ref, {search_term, Query, whole_word, _, starts_with, _} = QS, RequestHandlerPid} ->
@@ -137,13 +177,6 @@ wait_for_msg(CityServerList, FeatureClassA) ->
   end,
 
   wait_for_msg(CityServerList1, FeatureClassA).
-
-
-
-
-%% -----------------------------------------------------------------------------
-%%                            P R I V A T E   A P I
-%% -----------------------------------------------------------------------------
 
 %% -----------------------------------------------------------------------------
 %% Wait for responses from city servers
@@ -247,34 +280,38 @@ pids_are_equal(_Pid, _)   -> false.
 %% of the alphabet
 %%
 distribute_cities(FCP) ->
-  country_manager ! {starting, file_distribution, get(my_name)},
+  country_manager ! {starting, distribute_cities, get(my_name)},
+
+  %% Remember the number of cities in the process dictionary
+  put(city_count, length(FCP)),
+
   distribute_cities(FCP, []).
 
 %% CityServerList is a list of {pid, <0.1.0>, id, "A"}
 distribute_cities([], CityServerList) -> CityServerList;
 
-%% At the moment, we only care about records with feature classes "A" or "P"
-%% (population centres and administrative areas)
-distribute_cities([C | Rest], CityServerList) ->
-  [Char1 | _] = string:uppercase(C#geoname_int.name),
+%% Distribute FCP records amongst city servers based on the first character of
+%% the city name
+distribute_cities([FCP_Rec | Rest], CityServerList) ->
+  [Char1 | _] = string:uppercase(binary_to_list(FCP_Rec#geoname_int.name)),
 
   %% Extend CityServerList each time a city name starting with new letter of the
   %% alphabet is encountered
-  CityServerList1 = CityServerList ++ case lists:keyfind([Char1], 4, CityServerList) of
+  NewCityServer = case lists:keyfind([Char1], 4, CityServerList) of
     %% No child process exists yet for city names starting with this letter
     false ->
-      country_manager ! {starting, file_distribution, get(my_name), new_child, Char1},
-      [{pid, spawn_link(city_server, init, [self(), Char1, [C]]), id, [Char1]}];
+      country_manager ! {starting, distribute_cities, get(my_name), new_child, Char1},
+      [{pid, spawn_link(city_server, init, [self(), Char1, [FCP_Rec]]), id, [Char1]}];
 
     %% A child process already exists to handle cities starting with this letter,
     %% so send the curemnt record to that process.  We do not expect a reply
     {pid, ChildPid, id, _} ->
       % ?TRACE("Adding record for letter ~c",[Char1]),
-      ChildPid ! {add, C},
+      ChildPid ! {add, FCP_Rec},
       []
   end,
 
-  distribute_cities(Rest, CityServerList1).
+  distribute_cities(Rest, lists:append(CityServerList, NewCityServer)).
 
 
 %% -----------------------------------------------------------------------------
@@ -297,7 +334,7 @@ send_query_to_all(CityServerList, QueryDetails) ->
 format_proc_list(CityServerList) -> format_proc_list(CityServerList, "").
 
 format_proc_list([], Acc)                          -> lists:flatten(Acc);
-format_proc_list([{pid, Pid, id, Id} | Rest], Acc) -> format_proc_list(Rest, Acc ++ io_lib:format("~p ~s~n",[Pid,Id])).
+format_proc_list([{pid, Pid, id, Id} | Rest], Acc) -> format_proc_list(Rest, lists:append(Acc, [io_lib:format("~p ~s~n",[Pid,Id])])).
 
 
 
@@ -308,4 +345,11 @@ get_child_id(SomePid, CityServerList) ->
     {pid, _, id, Id} -> list_to_atom(Id);
     false            -> unknown_city_server_pid
   end.
+
+
+%% -----------------------------------------------------------------------------
+%% Extract country code from server name
+extract_cc(ServerName) ->
+  Name = atom_to_list(ServerName),
+  string:uppercase(lists:nthtail(length(Name)-2,Name)).
 
