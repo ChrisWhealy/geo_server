@@ -86,3 +86,11 @@ This server only returns GeoName records having feature classes set to `A` (Admi
 Within the server, there is a child server for each country listed in the [GeoNames countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt) file.
 
 Within each country server, town and city information is divided up amongst a set of dedicated child processes according to the first character of the town/city's name; therefore, setting the `starts_with` query string parameter to `true` will return a result set much faster because each country server knows it need only send the query to the child process dedicated to handling towns/cities starting with the first letter of the `search_term`.
+
+##   Admin Interface
+
+The admin interface of this geo-server is accessed by adding `/server_info` to the deployed URL.  Currently, no authentication is required to access this page.
+
+Even though the geo-server as a whole is started, each country server must be started manually.  Failure to start any country servers will result in all search queries returning an empty array!  The manual start up of country servers was added to avoid the app crashing on start up due to a memory usage spike that takes place when each country's [ZIP file](http://download.geonames.org/export/dump/) is unzipped.
+
+All country servers can be started - except for the United States! This ZIP file is currently too large to unzip within the current 2GB instance limit.  When this limit is raised to 4GB, this issue should no longer be a problem.
