@@ -16,7 +16,7 @@ Then edit the `manifest.yml` file and change the `route` parameter to point to y
 ##  Deploy to Cloud Foundry
 
 ***IMPORTANT***  
-Due to the fact that all the geographic information used by this server is held in memory, it requires 1600Mb of memory.  This server will probably not start if this memory allowance is reduced.
+Due to the fact that all the geographic information used by this server is held in memory, it requires 2048Mb of memory.  This server will probably not fully start if this memory allowance is reduced.
 
 Deploy to Cloud Foundry using the following community build pack for Erlang:
 
