@@ -21,8 +21,10 @@
 %% Start the geo_server application
 %% -----------------------------------------------------------------------------
 start(_Type, _Args) ->
+  process_flag(trap_exit, true),
   put(trace, true),
-  ?TRACE("Application start"),
+
+  ?TRACE("Application start. Type = ~p, Args =~p",[_Type, _Args]),
   
 	%% Get environment variables
   Port = case os:getenv("PORT") of
@@ -32,19 +34,33 @@ start(_Type, _Args) ->
 
 
   %% Start iBrowse and set parallel connection limit
-  ?TRACE("Starting iBrowse for connecting to GeoNames.org"),
+  ?TRACE("Starting iBrowse"),
   ibrowse:start(),
   ibrowse:set_dest(?GEONAMES_HOST, 80, [?HTTP_PARALLEL_REQ_LIMIT, ?HTTP_REQ_POOL_SIZE]),
 
   %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 	%% Import and then parse countryInfo.txt from GeoNames.org
   ?TRACE("Importing country information"),
-  spawn(import_files, import_country_info, [self()]),
+  spawn_link(import_files, import_country_info, [self()]),
 
   Countries =
 		receive
-			{country_list, L} -> L;
-			{error, Reason}   -> exit({error, Reason}), []
+      {'EXIT', ChildPid, Reason} ->
+        case Reason of
+          {retry_limit_exceeded, RetryList} ->
+            io:format("Retry limit exceeded downloading ~p~n",[RetryList]);
+
+          SomeError ->
+            io:format("Error ~p received from child proces ~p",[SomeError, ChildPid])
+        end,
+        
+        exit({error, Reason});
+
+			{country_list, L} ->
+        L;
+
+			{error, Reason} ->
+        exit({error, Reason}), []
     end,
 
   %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

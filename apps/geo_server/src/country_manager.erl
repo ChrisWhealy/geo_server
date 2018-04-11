@@ -42,7 +42,7 @@ start(CountryList) ->
   process_flag(trap_exit, true),
 
   % Debug trace
-  put(trace, false),
+  put(trace, true),
 
   ?TRACE("Country manager (~p) starting ~w country servers at ~s",[self(), length(CountryList), format_datetime(?NOW)]),
 

@@ -21,7 +21,8 @@
 -include("../include/time_utils.hrl").
 
 -define(STALE_AFTER, 86400).
--define(RETRY_WAIT, 5000).
+-define(RETRY_WAIT,  5000).
+-define(RETRY_LIMIT, 3).
 
 
 %% -----------------------------------------------------------------------------
@@ -31,7 +32,7 @@
 %% -----------------------------------------------------------------------------
 %% Import the country info file and send list of countries back to the application
 import_country_info(ApplicationPid) -> 
-  %% Assume that trace output is switched off
+  %% Debug trace output
   put(trace, true),
 
   {ok, PWD} = file:get_cwd(),
@@ -39,7 +40,7 @@ import_country_info(ApplicationPid) ->
 
   %% Download the country info file
   spawn(?MODULE, http_get_request, [self(), "countryInfo", ".txt", get(trace)]),
-  retry(wait_for_resources(1, text), text),
+  retry(wait_for_resources(1, text), text, 0),
   
   ApplicationPid ! case parse_countries_file("countryInfo", ".txt") of
     {ok, Countries} -> {country_list, Countries};
@@ -126,7 +127,7 @@ check_for_update(CountryCode) ->
       ?TRACE("Country file ~s.txt is stale.  Checking for new version",[CountryCode]),
       country_manager ! {starting, country_file_download, CountryCode},
       spawn(?MODULE, http_get_request, [self(), CountryCode, ".zip", get(trace)]),
-      retry(wait_for_resources(1, zip), zip);
+      retry(wait_for_resources(1, zip), zip, 0);
 
     false -> []
   end.
@@ -167,16 +168,19 @@ write_file(Dir, Filename, Ext, Content) ->
 
 %% -----------------------------------------------------------------------------
 %% Retry download of files that previously failed
-retry([], _) -> done;
+retry([], _, _) -> done;
 
-retry(RetryList, Ext) ->
+retry(RetryList, _, RetryCount) when RetryCount >= ?RETRY_LIMIT ->
+  exit({retry_limit_exceeded, RetryList});
+
+retry(RetryList, Ext, RetryCount) ->
   ?TRACE("Waiting ~ws before retrying download of ~w files",[(?RETRY_WAIT div 1000), length(RetryList)]),
   Parent = self(),
 
   receive
   after ?RETRY_WAIT ->
     lists:foreach(fun({F,Ext1}) -> spawn(?MODULE, http_get_request, [Parent, F, Ext1, get(trace)]) end, RetryList),
-    retry(wait_for_resources(length(RetryList), Ext), Ext)
+    retry(wait_for_resources(length(RetryList), Ext), Ext, RetryCount + 1)
   end.
 
 
@@ -250,12 +254,6 @@ wait_for_resources(Count, Fun, RetryList) ->
       end,
 
       RetryList ++ [{Filename, Ext}]
-  end,
-
-  %% If a download failed, update status with country_manager
-  case length(RetryList1) of
-    0 -> ok;
-    _ -> country_manager ! {starting, retrying_country_file_download, get(my_name)}
   end,
 
   wait_for_resources(Count-1, Fun, RetryList1).

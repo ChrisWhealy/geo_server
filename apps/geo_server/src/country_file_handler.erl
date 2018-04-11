@@ -39,6 +39,8 @@ country_file(CC, 0) ->
   Filename = ?COUNTRY_FILE_FULL(CC),
   Filesize = filelib:file_size(Filename),
 
+  %% Potentially need to wait at this point for the unzip process to complete
+
   ?TRACE("Importing ~s from full country file ~s", [format_as_binary_units(Filesize), Filename]),
 
   country_file(CC, file:open(Filename, [read]), Filesize);
