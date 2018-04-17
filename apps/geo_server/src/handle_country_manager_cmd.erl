@@ -1,18 +1,18 @@
--module(server_cmd_handler).
+-module(handle_country_manager_cmd).
 -behavior(cowboy_handler).
 
 -author("Chris Whealy <chris.whealy@sap.com>").
 -revision("Revision: 1.0.0").
--created("Date: 2018/04/06 14:52:17").
+-created("Date: 2018/04/17 11:43:29").
 -created_by("chris.whealy@sap.com").
 
 -export([init/2]).
 
 -include("../include/trace.hrl").
 -include("../include/default_http_response.hrl").
+-include("../include/utils.hrl").
 
 -define(HTTP_GET, <<"GET">>).
--define(QS_PARAMETERS, [server_name, cmd]).
 
 
 %% -----------------------------------------------------------------------------
@@ -21,12 +21,24 @@
 
 init(Req=#{method := ?HTTP_GET}, State) ->
   put(trace, false),
-	#{server_name := ServerName, cmd := Cmd} = cowboy_req:match_qs(?QS_PARAMETERS, Req),
-  ?TRACE("Got command from client: ~p ~p",[Cmd,ServerName]),
+	#{cmd := Cmd} = cowboy_req:match_qs([cmd], Req),
+  ?TRACE("Got command ~p from client",[Cmd]),
 
-  country_manager ! {cmd, as_atom(Cmd), as_atom(ServerName)},
+  %% Send the command to the country manager
+  JsonResp = case Cmd of
+    %% The name of the server to be started must also appear in the query string
+    <<"set_debug">> ->
+      #{param := Param} = cowboy_req:match_qs([param], Req),
 
-  {ok, cowboy_req:reply(200, ?CONTENT_TYPE_HTML, redirect_to_server_info(), Req), State};
+      case Param of
+        <<"true">>  -> country_manager ! {cmd, trace, on};
+        <<"false">> -> country_manager ! {cmd, trace, off}
+      end,
+
+      list_to_binary([<<"{\"status\":\"ok\", \"cmd\":\"set_debug\", \"param\":\"">>, Param, <<"\"}">>])
+  end,
+
+  {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, JsonResp, Req), State};
 
 
 init(Req, State) ->
@@ -37,10 +49,4 @@ init(Req, State) ->
 %%                           P R I V A T E   A P I
 %% -----------------------------------------------------------------------------
 
-redirect_to_server_info() ->
-  list_to_binary("<html><head><meta http-equiv=\"refresh\" content=\"0; url=/server_info\"/></head></html>").
-
-as_atom(V) when is_binary(V) -> list_to_atom(binary_to_list(V));
-as_atom(V) when is_atom(V)   -> V;
-as_atom(V)                   -> list_to_atom(V).
 

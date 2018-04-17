@@ -1,4 +1,4 @@
--module(request_handler).
+-module(handle_search).
 -behavior(cowboy_handler).
 
 -author("Chris Whealy <chris.whealy@sap.com>").

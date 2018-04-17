@@ -1,4 +1,4 @@
--module(client_info_handler).
+-module(handle_client_info).
 -behavior(cowboy_handler).
 
 -export([init/2]).

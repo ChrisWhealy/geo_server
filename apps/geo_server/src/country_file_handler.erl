@@ -10,8 +10,7 @@
 ]).
 
 -include("../include/trace.hrl").
--include("../include/time_utils.hrl").
--include("../include/format_utils.hrl").
+-include("../include/utils.hrl").
 -include("../include/file_paths.hrl").
 -include("../include/rec_geoname.hrl").
 

@@ -1,4 +1,4 @@
--module(default_handler).
+-module(handle_root).
 -behavior(cowboy_handler).
 
 -export([init/2]).

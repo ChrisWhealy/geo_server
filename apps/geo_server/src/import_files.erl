@@ -9,7 +9,7 @@
     import_country_info/1
   , http_get_request/4
   , http_head_request/4
-  , write_file/4
+  , write_file/2, write_file/4
   , handle_zip_file/4
   , check_for_update/1
 ]).
@@ -18,7 +18,7 @@
 -include("../include/http_status_codes.hrl").
 -include("../include/file_paths.hrl").
 -include("../include/now.hrl").
--include("../include/time_utils.hrl").
+-include("../include/utils.hrl").
 
 -define(STALE_AFTER, 86400).
 -define(RETRY_WAIT,  5000).
@@ -44,7 +44,7 @@ import_country_info(ApplicationPid) ->
   
   ApplicationPid ! case parse_countries_file("countryInfo", ".txt") of
     {ok, Countries} -> {country_list, Countries};
-    {error, Reason} -> {error, Reason}
+    {error, Reason} -> exit({parse_error, Reason})
   end.
 
 
@@ -92,7 +92,7 @@ http_get_request(CallerPid, Filename, Ext, Trace) ->
   %% Check to see if we have an ETag for this file
   Response = case read_etag_file(Filename) of
     missing -> 
-      ?TRACE("ETag missing, sending normal GET request for ~s",[Url]),
+      ?TRACE("ETag file missing, sending normal GET request for ~s",[Url]),
       ibrowse:send_req(Url, [], get);
 
     Etag ->
@@ -155,6 +155,12 @@ handle_zip_file(Dir, File, Ext, Body) ->
 
 %% -----------------------------------------------------------------------------
 %% Write file to disc
+write_file(FQFilename, Content) ->
+  case file:write_file(FQFilename, Content) of
+    ok              -> ok;
+    {error, Reason} -> io:format("Writing file ~s failed. ~p~n",[FQFilename, Reason])
+  end.
+
 write_file(Dir, Filename, Ext, Content) ->
   case file:write_file(Dir ++ Filename ++ Ext, Content) of
     ok              -> ok;
@@ -224,7 +230,7 @@ wait_for_resources(Count, Fun, RetryList) ->
       %% If an ETag is included in the HTTP response, then write it to disc
       case Etag of
         missing -> done;
-        _       -> write_file(TargetDir, Filename, ".etag", Etag)
+        _       -> write_file(?COUNTRY_FILE_ETAG(Filename), Etag)
       end,
 
       %% Call handler for this file type    
@@ -269,7 +275,6 @@ parse_countries_file({ok, IoDevice})  -> {ok, read_countries_file(IoDevice, [])}
 parse_countries_file({error, Reason}) -> {error, Reason}.
 
 
-
 %% -----------------------------------------------------------------------------
 %% Read the countries file and create a list of country codes skipping any lines
 %% that import_country_info with a hash character
@@ -295,7 +300,9 @@ get_country_info(_,  Tokens, Acc) ->
 %% Read local eTag file
 read_etag_file({ok, IoDevice}) -> read_etag_file(IoDevice, io:get_line(IoDevice,""), "");
 read_etag_file({error, _})     -> missing;
-read_etag_file(Filename)       -> read_etag_file(file:open(?TARGET_DIR ++ Filename ++ ".etag", [read])).
+read_etag_file(Filename)       ->
+  ?TRACE("Trying to open Etag file for ~s",[?COUNTRY_FILE_ETAG(Filename)]),
+  read_etag_file(file:open(lists:append([?COUNTRY_FILE_ETAG(Filename)]), [read])).
 
 read_etag_file(IoDevice, eof, "")   -> file:close(IoDevice), missing;
 read_etag_file(IoDevice, eof, Etag) -> file:close(IoDevice), Etag;

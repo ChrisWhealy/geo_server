@@ -8,6 +8,7 @@
 
 -define(CONTENT_TYPE_PLAIN_TEXT, #{<<"content-type">> => <<"text/plain">>}).
 -define(CONTENT_TYPE_HTML,       #{<<"content-type">> => <<"text/html; charset=utf-8">>}).
+-define(CONTENT_TYPE_JSON,       #{<<"content-type">> => <<"text/json">>}).
 
 -define(SERVER_RUNNING, <<"geo_server is running">>).
 
