@@ -231,7 +231,8 @@ wait_for_msgs(CountryServerList) ->
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Shutdown a specific country server
-    {cmd, shutdown, CountryServer, RequestHandlerPid} ->
+    {cmd, shutdown, CountryCode, RequestHandlerPid} ->
+      CountryServer = ?COUNTRY_SERVER_NAME(CountryCode),
       ?TRACE("Shutdown country server ~p",[CountryServer]),
 
       case whereis(CountryServer) of

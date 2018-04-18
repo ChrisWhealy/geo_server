@@ -16,26 +16,24 @@
 
 -define(QS_PARAMETERS, [search_term, whole_word, starts_with]).
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %%                             P U B L I C   A P I
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 init(Req, _State) ->
 	%% Debug trace
-	put(trace, false),
+	put(trace, true),
 
 	#{search_term := P1, whole_word := P2, starts_with := P3} = cowboy_req:match_qs(?QS_PARAMETERS, Req),
 
 	QS = {search_term, binary_to_list(P1),
 	      whole_word,  binary_to_atom(P2, latin1),
         starts_with, binary_to_atom(P3, latin1)},
-        
-  ?TRACE("~p", [QS]),
 
   % Are the query string parameters valid?
   Response = case validate_qs_parms(QS) of
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     true ->
       % Get list of started country servers from the country_manager
       country_manager ! {cmd, status, started, self()},
@@ -54,15 +52,15 @@ init(Req, _State) ->
 
       cowboy_req:reply(200,
         #{<<"content-type">>                => <<"text/json">>,
-          <<"access-control-allow-origin">> => <<"http://localhost:12345">>},
+          <<"access-control-allow-origin">> => cowboy_req:header(<<"origin">>, Req)},
         geoname_to_json(ResultList),
         Req);
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    false ->
+    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  false ->
       cowboy_req:reply(400,
         #{<<"content-type">>                => <<"text/json">>,
-          <<"access-control-allow-origin">> => <<"http://localhost:12345">>},
+          <<"access-control-allow-origin">> => cowboy_req:header(<<"origin">>, Req)},
         format_bad_request(QS),
         Req)
 
@@ -74,11 +72,11 @@ init(Req, _State) ->
 
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %%                            P R I V A T E   A P I
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 wait_for_results(Ref, N) -> wait_for_results(Ref, N, []).
 
 wait_for_results(_Ref, 0, Acc) ->
@@ -91,7 +89,7 @@ wait_for_results(Ref, N, Acc) ->
 		{error,   Ref, Reason}     -> wait_for_results(Ref, N-1, Acc ++ Reason)
   end.
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Convert a geoname_int record to a JSON string in binary format
 geoname_to_json(GeonameList) -> geoname_to_json(GeonameList, []).
 
@@ -118,7 +116,7 @@ geoname_to_json([G | Rest], Acc) ->
 val_or_null(undefined) -> <<"null">>;
 val_or_null(Val)       -> Val.
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Validate the query string parameter values
 validate_qs_parms({search_term, _, whole_word, WW, starts_with, SW}) ->
   is_boolean(WW) and is_boolean(SW).
