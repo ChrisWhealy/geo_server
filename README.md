@@ -28,13 +28,13 @@ Deploy to Cloud Foundry using the following community build pack for Erlang:
 
 When this app is deployed to CF and started, the `country_manager` process starts.  This is the supervisor responsible for managing the lifecycle of all country servers.  One country server is created for each country listed in the GeoNames file [countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt).
 
-By default, none of the country servers are started automatically because this would create a memory usage spike that exceeds the hard instance limit of 2Gb.  Therefore, country servers must be started manually, and one at a time starting with the largest.
+By default, none of the country servers are started automatically because this would create a memory usage spike that exceeds the hard instance limit of 2Gb.  Therefore, country servers must be started manually, and one at a time, starting with the largest.
 
 ### Admin Interface
 
-In order to start one or more country servers, you must use geo-server admin interface.  This is accessed by adding `/server_info` to the deployed URL.  Currently, no authentication is required to access this page.
+In order to start one or more country servers, you must use the `geo-server` admin interface.  This is accessed by adding `/server_info` to the deployed URL.  Currently, no authentication is required to access this page.
 
-If you do not start any country servers, all search queries to the geo-server will return an empty array!
+If you do not start any country servers, all search queries to the `geo-server` will return an empty JSON array!
 
 ### Country Server Startup Sequence
 
@@ -42,23 +42,26 @@ The country servers should be started one at a time, in descending order of ZIP 
 
 #### Startup Order
 
-All country servers can be started - except for the United States! This ZIP file is currently too large to unzip within the current 2GB instance limit.  When this limit is raised to 4GB, this issue should no longer be a problem.
+All country servers can be started - except for the United States! This ZIP file is currently too large to unzip within the current 2Gb instance limit.  When this limit is raised to 4Gb, this issue should no longer be a problem.
 
 Apart from the United States, start each country server starting from the largest.
 
 Once, you've pressed the start button next to a country, wait for the substatus to change from `country_file_download` to `file_import` (you must refresh the screen to see the substatus change).  Once this happens, you can then start the next country server.
 
-For countries whose ZIP files are larger than 3Mb, it is safer to start the country servers one at a time.  For country servers with smaller ZIP files, you can start two or three at a time.
+For countries whose ZIP files are larger than about 3Mb, it is safer to start the country servers one at a time.  For country servers with smaller ZIP files, you can start two or three at a time.
 
-For the smaller country servers, you can start twenty or so at one time.
+For the smallest country servers, you can start twenty or so at one time.
 
 ### Country Server Startup Processing
 
 When an individual country server is started, the following sequence of events takes place:
 
 * The country's [ZIP file](http://download.geonames.org/export/dump/) is downloaded from the GeoNames website and unzipped as a plain text file.
-* The country's text file is scanned for all records related to population centres (Feature Class "P") having a population greater than 500, and administrative areas (Feature Class "A").  These values are extracted and written to two text files (`FCA.txt` and `FCP.txt`)
-    * The eTag for each downloaded country file is also stored.  If the country server is restarted more than 24 hours after the eTag data was downloaded, then the local country data is considered potentially stale.  Now, the eTag value will be used to check if a new version of the country file exists.
+* The country's text file is scanned only for records having a feature class of "P" (population centres) and "A" (administrative areas).
+    * A further limit is imposed that feature class "P" records must refer to towns or cities having a population greater than some arbitrary limit (currently set to 500)
+* The feature class "A" and "P" records are extracted and written to two text files (`FCA.txt` and `FCP.txt`)
+* The eTag for each downloaded country file is also stored.
+    * If the country server is restarted more than 24 hours after the eTag data was downloaded, then the local country data is considered potentially stale.  The eTag value is now used to check if a new version of the country file exists.
     * Each time a country server is started, the existence of the `FCA.txt` and `FCP.txt` files is checked.  If they exist and are not stale, then they will be read in preference to downloading the country's ZIP file.  This greatly reduces the country server's start up time.
 
 
@@ -81,7 +84,7 @@ For example, to search for all cities containing the string "york" somewhere in 
 
 Similarly, to search for all cities starting with the whole word "london", the URL would be:
 
-`<hostname>/search?search_term=york&starts_with=true&whole_word=true`
+`<hostname>/search?search_term=london&starts_with=true&whole_word=true`
 
 ##  Response
 
@@ -120,7 +123,9 @@ Each city object returned by the server contains the following properties:
 
 ## Server Performance
 
-Within the server, there is a child server for each country listed in the [GeoNames countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt) file.
+For each country listed in the [GeoNames countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt) file a corresponding country server can be started.
 
-Within each country server, town and city information is divided up amongst a set of dedicated child processes according to the first character of the town/city's name; therefore, setting the `starts_with` query string parameter to `true` will return a result set much faster because each country server knows it need only send the query to the child process dedicated to handling towns/cities starting with the first letter of the `search_term`.
+Each country server then starts one or more city servers by dividing up all the cities according to the first character of the town/city's name.  So there will be a city server for all cities in that country starting with `a`, one for `b`, and one for `c` etc.
+
+Therefore, setting the `starts_with` query string parameter to `true` will return a result set much faster because each country server knows it need only send the query to the child process dedicated to handling towns/cities starting with the first letter of the `search_term`.
 
