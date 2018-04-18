@@ -16,11 +16,52 @@ Then edit the `manifest.yml` file and change the `route` parameter to point to y
 ##  Deploy to Cloud Foundry
 
 ***IMPORTANT***  
-Due to the fact that all the geographic information used by this server is held in memory, it requires 2048Mb of memory.  This server will probably not fully start if this memory allowance is reduced.
+For performance reasons, all the geographic information used by this server is held in memory; therefore, this app requires 2048Mb of memory.  The `geo-server` will probably not fully start if this memory allowance is reduced.
 
 Deploy to Cloud Foundry using the following community build pack for Erlang:
 
     $ cf push -b https://github.com/ChrisWhealy/cf-buildpack-erlang
+
+##   Server Startup
+
+### Country Manager
+
+When this app is deployed to CF and started, the `country_manager` process starts.  This is the supervisor responsible for managing the lifecycle of all country servers.  One country server is created for each country listed in the GeoNames file [countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt).
+
+By default, none of the country servers are started automatically because this would create a memory usage spike that exceeds the hard instance limit of 2Gb.  Therefore, country servers must be started manually, and one at a time starting with the largest.
+
+### Admin Interface
+
+In order to start one or more country servers, you must use geo-server admin interface.  This is accessed by adding `/server_info` to the deployed URL.  Currently, no authentication is required to access this page.
+
+If you do not start any country servers, all search queries to the geo-server will return an empty array!
+
+### Country Server Startup Sequence
+
+The country servers should be started one at a time, in descending order of ZIP file size.  This is due to the fact that currently, unzipping a file causes a memory usage spike - the larger the ZIP file, the larger the spike.
+
+#### Startup Order
+
+All country servers can be started - except for the United States! This ZIP file is currently too large to unzip within the current 2GB instance limit.  When this limit is raised to 4GB, this issue should no longer be a problem.
+
+Apart from the United States, start each country server starting from the largest.
+
+Once, you've pressed the start button next to a country, wait for the substatus to change from `country_file_download` to `file_import` (you must refresh the screen to see the substatus change).  Once this happens, you can then start the next country server.
+
+For countries whose ZIP files are larger than 3Mb, it is safer to start the country servers one at a time.  For country servers with smaller ZIP files, you can start two or three at a time.
+
+For the smaller country servers, you can start twenty or so at one time.
+
+### Country Server Startup Processing
+
+When an individual country server is started, the following sequence of events takes place:
+
+* The country's [ZIP file](http://download.geonames.org/export/dump/) is downloaded from the GeoNames website and unzipped as a plain text file.
+* The country's text file is scanned for all records related to population centres (Feature Class "P") having a population greater than 500, and administrative areas (Feature Class "A").  These values are extracted and written to two text files (`FCA.txt` and `FCP.txt`)
+    * The eTag for each downloaded country file is also stored.  If the country server is restarted more than 24 hours after the eTag data was downloaded, then the local country data is considered potentially stale.  Now, the eTag value will be used to check if a new version of the country file exists.
+    * Each time a country server is started, the existence of the `FCA.txt` and `FCP.txt` files is checked.  If they exist and are not stale, then they will be read in preference to downloading the country's ZIP file.  This greatly reduces the country server's start up time.
+
+
 
 ##  API
 
@@ -77,20 +118,9 @@ Each city object returned by the server contains the following properties:
 | `admin4Txt` | The name of the 4th level administrative region to which this town/city belongs |
 | `timeZone` | The name of the timezone in which this town/city is located |
 
-##   Server Behaviour
-
-This server only returns GeoName records having feature classes set to `A` (Administrative centres) or `P` (Population Centres).  Also, this server only returns feature class `P` records (I.E. towns or cities) having a population greater than 500.
-
 ## Server Performance
 
 Within the server, there is a child server for each country listed in the [GeoNames countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt) file.
 
 Within each country server, town and city information is divided up amongst a set of dedicated child processes according to the first character of the town/city's name; therefore, setting the `starts_with` query string parameter to `true` will return a result set much faster because each country server knows it need only send the query to the child process dedicated to handling towns/cities starting with the first letter of the `search_term`.
 
-##   Admin Interface
-
-The admin interface of this geo-server is accessed by adding `/server_info` to the deployed URL.  Currently, no authentication is required to access this page.
-
-Even though the geo-server as a whole is started, each country server must be started manually.  Failure to start any country servers will result in all search queries returning an empty array!  The manual start up of country servers was added to avoid the app crashing on start up due to a memory usage spike that takes place when each country's [ZIP file](http://download.geonames.org/export/dump/) is unzipped.
-
-All country servers can be started - except for the United States! This ZIP file is currently too large to unzip within the current 2GB instance limit.  When this limit is raised to 4GB, this issue should no longer be a problem.
