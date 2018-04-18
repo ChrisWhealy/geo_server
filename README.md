@@ -63,6 +63,7 @@ When an individual country server is started, the following sequence of events t
 * The eTag for each downloaded country file is also stored.
     * If the country server is restarted more than 24 hours after the eTag data was downloaded, then the local country data is considered potentially stale.  The eTag value is now used to check if a new version of the country file exists.
     * Each time a country server is started, the existence of the `FCA.txt` and `FCP.txt` files is checked.  If they exist and are not stale, then they will be read in preference to downloading the country's ZIP file.  This greatly reduces the country server's start up time.
+* If you start a country server and find that it immediately stops with a substatus of `no_cities`, this is simply because no cities exist in that country with a population greater than the population limit (currently set to 500)
 
 
 
