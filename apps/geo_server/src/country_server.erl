@@ -15,15 +15,15 @@
 -include("../include/file_paths.hrl").
 -include("../include/now.hrl").
 
-%% -----------------------------------------------------------------------------
-%%                             P U B L I FCP_Rec   A P I
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
+%%                                                    P U B L I C   A P I
+%% ---------------------------------------------------------------------------------------------------------------------
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Initialise the country server
-%% We could be passed either the two character country code as a string, or
-%% the name of server as an atom depending on where the start command came from
+%% We could be passed either the two character country code as a string, or the name of server as an atom depending on
+%% where the start command came from
 init(CC) when is_list(CC) ->
   do_init(list_to_atom("country_server_" ++ string:lowercase(CC)));
 
@@ -31,15 +31,16 @@ init(CC) when is_atom(CC) ->
   do_init(CC).
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Start the country server
 start(CC, ServerName) ->
   process_flag(trap_exit, true),
   
-  %% Store my own server name, the country_manager's Pid and my country code
+  %% Store various values in the process dictionary
   put(my_name, ServerName),
   put(country_manager_pid, whereis(country_manager)),
   put(cc, CC),
+  put(city_count, unknown),
 
   %% Switch trace off for normal operation
   put(trace, false),
@@ -47,8 +48,7 @@ start(CC, ServerName) ->
   %% Inform country manager that this server is starting up
   country_manager ! {starting, init, ServerName, ?NOW},
 
-  %% Ensure that the country directory exists, then check if the country file
-  %% needs to be updated
+  %% Ensure that the country directory exists, then check if the country file needs to be updated
   TargetDir = ?TARGET_DIR ++ CC ++ "/",
   ?TRACE("Starting country server ~s in ~s",[CC, TargetDir]),
 
@@ -79,17 +79,17 @@ start(CC, ServerName) ->
 
   
   %% Inform country manager that start up is complete
-  country_manager ! {started, running, ServerName, ?NOW},
+  country_manager ! {started, running, ServerName, get(city_count), ?NOW},
 
   wait_for_msg(CityServerList, FeatureClassA).
 
 
 
-%% -----------------------------------------------------------------------------
-%%                            P R I V A T E   A P I
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
+%%                                               P R I V A T E   A P I
+%% ---------------------------------------------------------------------------------------------------------------------
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Internal startup function
 do_init(ServerName) ->
   %% Has this country server already been registered?
@@ -104,10 +104,9 @@ do_init(ServerName) ->
       SomePid
   end.
 
-%% -----------------------------------------------------------------------------
-%% If the CityServerList is empty, then either this country has no cities with
-%% populations large enough to appear in a search, or all the city servers have
-%% shut down.  Either way, the country server should also shut down
+%% ---------------------------------------------------------------------------------------------------------------------
+%% If the CityServerList is empty, then either this country has no cities with populations large enough to appear in a
+%% search, or all the city servers have shut down.  Either way, the country server should also shut down
 wait_for_msg([], _) ->
   put(trace, true),
 
@@ -121,14 +120,14 @@ wait_for_msg([], _) ->
 
 wait_for_msg(CityServerList, FeatureClassA) ->
   CityServerList1 = receive
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Termination messages
 
     %% Handle process exit
     {'EXIT', SomePid, Reason} ->
       handle_exit(SomePid, Reason, CityServerList);
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Server commands
     
     %% Commands sent to all city servers
@@ -167,7 +166,7 @@ wait_for_msg(CityServerList, FeatureClassA) ->
       RequestHandlerPid ! {city_count, get(city_count)},
       CityServerList;
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Query
     {query, Ref, {search_term, Query, whole_word, _, starts_with, _} = QS, RequestHandlerPid} ->
       ?TRACE("Country server ~s (~p) received query \"~s\" from request handler ~p", [get(cc), self(), Query, RequestHandlerPid]),
@@ -178,7 +177,7 @@ wait_for_msg(CityServerList, FeatureClassA) ->
 
   wait_for_msg(CityServerList1, FeatureClassA).
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Wait for responses from city servers
 
 %% Response from last city server
@@ -191,7 +190,7 @@ wait_for_results(Ref, N, ResultList) ->
   ?TRACE("Country server ~s waiting for ~w more results", [get(cc), N]),
 
   ResultList1 = ResultList ++ receive
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Response from city server - which might be an empty list
     {results, Ref, _Id, SearchResults} ->
       case length(SearchResults) of
@@ -206,20 +205,19 @@ wait_for_results(Ref, N, ResultList) ->
 
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Handle query from client
 
-%% If the starts_with parameter is false, then the "contains" search option has
-%% been selected.  Therefore, the query must be sent to all city servers for
-%% this country
+%% If the starts_with parameter is false, then the "contains" search option has been selected.  Therefore, the query
+%% must be sent to all city servers for this country
 handle_query(Ref, CityServerList, {search_term, Query, whole_word, _, starts_with, false} = QS) ->
   ?TRACE("Sending query to all city servers"),
   send_query_to_all(CityServerList, {Ref, QS, get(cc), Query, self()}),
   wait_for_results(Ref, length(CityServerList), []);
 
 
-%% If the starts_with parameter is true, then query need only be sent to the
-%% city server handling cities starting with the first letter of the search term
+%% If the starts_with parameter is true, then query need only be sent to the city server handling cities starting with
+%% the first letter of the search term
 handle_query(Ref, CityServerList, {search_term, [Char1 | _] = Query, whole_word, _, starts_with, true} = QS) ->
   Id = string:uppercase([Char1]),
 
@@ -239,14 +237,14 @@ handle_query(Ref, CityServerList, {search_term, [Char1 | _] = Query, whole_word,
   end.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Handle EXIT messages.
 %% This function must return some version of the CityServerList
 handle_exit(SomePid, Reason, CityServerList) ->
   %% Has the country_manager shut down?
   case pids_are_equal(get(country_manager_pid), SomePid) of
-    %% Yup, so shut down all the city servers (which in turn, will cause this
-    %% country_server to shut down with reason 'no_cities')
+    %% Yup, so shut down all the city servers (which in turn, will cause this country_server to shut down with reason
+    %% 'no_cities')
     true ->
       send_cmd_to_all(CityServerList, shutdown),
       CityServerList;
@@ -275,9 +273,8 @@ handle_exit(SomePid, Reason, CityServerList) ->
 pids_are_equal(_Pid, _Pid) -> true;
 pids_are_equal(_Pid, _)   -> false.
 
-%% -----------------------------------------------------------------------------
-%% Create a child process to handle the cities belonging to successive letters
-%% of the alphabet
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Create a child process to handle the cities belonging to successive letters of the alphabet
 %%
 distribute_cities(FCP) ->
   country_manager ! {starting, distribute_cities, get(my_name)},
@@ -290,21 +287,19 @@ distribute_cities(FCP) ->
 %% CityServerList is a list of {pid, <0.1.0>, id, "A"}
 distribute_cities([], CityServerList) -> CityServerList;
 
-%% Distribute FCP records amongst city servers based on the first character of
-%% the city name
+%% Distribute FCP records amongst city servers based on the first character of the city name
 distribute_cities([FCP_Rec | Rest], CityServerList) ->
   [Char1 | _] = string:uppercase(binary_to_list(FCP_Rec#geoname_int.name)),
 
-  %% Extend CityServerList each time a city name starting with new letter of the
-  %% alphabet is encountered
+  %% Extend CityServerList each time a city name starting with new letter of the alphabet is encountered
   NewCityServer = case lists:keyfind([Char1], 4, CityServerList) of
     %% No child process exists yet for city names starting with this letter
     false ->
       country_manager ! {starting, distribute_cities, get(my_name), new_child, Char1},
       [{pid, spawn_link(city_server, init, [self(), Char1, [FCP_Rec]]), id, [Char1]}];
 
-    %% A child process already exists to handle cities starting with this letter,
-    %% so send the curemnt record to that process.  We do not expect a reply
+    %% A child process already exists to handle cities starting with this letter, so send the curemnt record to that
+    %% process.  We do not expect a reply
     {pid, ChildPid, id, _} ->
       % ?TRACE("Adding record for letter ~c",[Char1]),
       ChildPid ! {add, FCP_Rec},
@@ -314,7 +309,7 @@ distribute_cities([FCP_Rec | Rest], CityServerList) ->
   distribute_cities(Rest, lists:append(CityServerList, NewCityServer)).
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Send either a command or a query to all children
 send_cmd_to_all(CityServerList, Cmd) ->
   lists:foreach(fun({pid, Pid, id, _}) -> Pid ! {cmd, Cmd} end, CityServerList).
@@ -329,7 +324,7 @@ send_query_to_all(CityServerList, QueryDetails) ->
 
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Format process list
 format_proc_list(CityServerList) -> format_proc_list(CityServerList, "").
 
@@ -338,7 +333,7 @@ format_proc_list([{pid, Pid, id, Id} | Rest], Acc) -> format_proc_list(Rest, lis
 
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Get child process id.  Returns an atom
 get_child_id(SomePid, CityServerList) ->
   case lists:keyfind(SomePid, 2, CityServerList) of
@@ -347,7 +342,7 @@ get_child_id(SomePid, CityServerList) ->
   end.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Extract country code from server name
 extract_cc(ServerName) ->
   Name = atom_to_list(ServerName),

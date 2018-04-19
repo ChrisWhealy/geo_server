@@ -90,6 +90,7 @@ record_to_json(country_server, Rec) ->
     , status         = Rec#country_server.status
     , substatus      = Rec#country_server.substatus
     , progress       = Rec#country_server.progress
+    , city_count     = Rec#country_server.city_count
     , children       = len(Rec#country_server.children)
     , started_at     = format_datetime(Rec#country_server.started_at)
     , start_complete = format_seconds(time_diff(Rec#country_server.start_complete, Rec#country_server.started_at))

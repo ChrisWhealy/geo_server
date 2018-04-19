@@ -145,9 +145,9 @@ wait_for_msgs(CountryServerList) ->
   
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Start up complete, server now running
-    {started, running, CountryServer, StartupComplete} ->
-      ?TRACE("Country server ~p up and running",[CountryServer]),
-      set_server_status(CountryServerList, CountryServer, started, running, complete, [], StartupComplete);
+    {started, running, CountryServer, CityCount, StartupComplete} ->
+      ?TRACE("Country server ~p is up and running",[CountryServer]),
+      set_server_running(CountryServerList, CountryServer, CityCount, StartupComplete);
     
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -303,6 +303,33 @@ update_zip_size(Rec, ZipSize) ->
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
+%% Update country server status record to "running"
+set_server_running(CountryServerList, Name, CityCount, StartComplete) ->
+  Rec = lists:keyfind(Name, #country_server.name, CountryServerList),
+
+  ServerStatus = #country_server{
+    name           = Rec#country_server.name
+  , country_name   = Rec#country_server.country_name
+  , continent      = Rec#country_server.continent
+  , country_code   = Rec#country_server.country_code
+  , pid            = Rec#country_server.pid
+  , status         = started
+  , substatus      = running
+  , progress       = 100
+  , children       = Rec#country_server.children
+  , city_count     = CityCount
+  , started_at     = Rec#country_server.started_at
+  , start_complete = StartComplete
+  , mem_usage      = memory_usage(Rec#country_server.name)
+  , zip_size       = Rec#country_server.zip_size
+  },
+
+  ?TRACE("Updated status is now ~p",[format_country_server_record(ServerStatus)]),
+
+  lists:keyreplace(Name, #country_server.name, CountryServerList, ServerStatus).
+
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Update status of a given server without time stamp
 %% When a server crashes, we only get the Pid that used to exist
 set_server_status(CountryServerList, Pid, crashed, Substatus, _, _, _) when is_pid(Pid) ->
@@ -344,8 +371,6 @@ set_server_status(CountryServerList, Name, stopped, Substatus, _, _, _) ->
 set_server_status(CountryServerList, Name, Status, Substatus, Progress, Children, Time) ->
   Rec = lists:keyfind(Name, #country_server.name, CountryServerList),
 
-  ?TRACE("Updating status for country_server record ~p",[format_country_server_record(Rec)]),
-
   ServerStatus = #country_server{
     name         = Name
   , country_name = Rec#country_server.country_name
@@ -372,7 +397,7 @@ set_server_status(CountryServerList, Name, Status, Substatus, Progress, Children
               end
     end
 
-  , city_count = get_city_count(Rec)
+  , city_count = Rec#country_server.city_count
 
   , started_at = case Substatus of
       init -> Time;
@@ -392,22 +417,9 @@ set_server_status(CountryServerList, Name, Status, Substatus, Progress, Children
   , zip_size  = Rec#country_server.zip_size
   },
 
+  ?TRACE("Updated country_server is now ~p",[format_country_server_record(ServerStatus)]),
+
   lists:keyreplace(Name, #country_server.name, CountryServerList, ServerStatus).
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Get city count from a country server.
-%% This request will only be sent if the country server has a substatus of running or no_cities
-get_city_count(S) when S#country_server.substatus == running ->
-  %% Get city count from country server
-  S#country_server.name ! {cmd, city_count, self()},
-
-  receive
-    {city_count, N} -> N
-  end;
-
-get_city_count(S) when S#country_server.substatus == no_cities -> 0;
-get_city_count(_)                                              -> undefined.
 
 
 %% ---------------------------------------------------------------------------------------------------------------------

@@ -173,7 +173,7 @@ function build_table_columns(country) {
     , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.substatus)
     , htmlElement("td", [TD_ALIGN("right")], country.progress)
     , htmlElement("td", [TD_ALIGN("right")], country.city_count)
-    , htmlElement("td", [TD_ALIGN("right")], country.child_count)
+    , htmlElement("td", [TD_ALIGN("right")], country.children)
     , htmlElement("td", [TD_ALIGN("right")], country.started_at)
     , htmlElement("td", [TD_ALIGN("right")], country.start_complete)
     , htmlElement("td", [TD_ALIGN("right")], country.mem_usage)
