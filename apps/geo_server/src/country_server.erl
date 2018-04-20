@@ -55,33 +55,20 @@ start(CC, ServerName) ->
   filelib:ensure_dir(TargetDir),
   import_files:check_for_update(CC),
 
-  {FeatureClassA, CityServerList} = case country_file_handler:country_file(CC) of
-    {fca, FCA_Response, fcp, FCP_Response} ->
-      %% Check for errors importing internal FCA file
-      FCA = case FCA_Response of
-        {error, FCA_Reason} -> exit({fca_country_file_error, FCA_Reason});
-        FCA_Data            -> FCA_Data
-      end,
-
-      %% Check for errors importing internal FCP file
-      FCP = case FCP_Response of
-        {error, FCP_Reason} -> exit({fcp_country_file_error, FCP_Reason});
-        FCP_Data            -> FCP_Data
-      end,
-
-      {FCA, distribute_cities(FCP)};
-
-    %% Check for errors importing full country text file
+  CityServerList = case country_file_handler:country_file(CC) of
     {error, Reason} ->
       exit({country_file_error, io_lib:format("~p",[Reason])}),
-      {[],[]}
+      [];
+
+    FCP_Data ->
+      distribute_cities(FCP_Data)
   end,
 
   
   %% Inform country manager that start up is complete
   country_manager ! {started, running, ServerName, get(city_count), ?NOW},
 
-  wait_for_msg(CityServerList, FeatureClassA).
+  wait_for_msg(CityServerList).
 
 
 
@@ -107,7 +94,7 @@ do_init(ServerName) ->
 %% ---------------------------------------------------------------------------------------------------------------------
 %% If the CityServerList is empty, then either this country has no cities with populations large enough to appear in a
 %% search, or all the city servers have shut down.  Either way, the country server should also shut down
-wait_for_msg([], _) ->
+wait_for_msg([]) ->
   put(trace, true),
 
   Reason = case get(shutdown) of
@@ -115,10 +102,10 @@ wait_for_msg([], _) ->
     _         -> stopped
   end,
 
-  ?TRACE("No city servers: ~p",[Reason]),
+  ?TRACE("~p stopping.  Reason: ~p",[get(my_name), Reason]),
   exit({Reason, get(my_name)});
 
-wait_for_msg(CityServerList, FeatureClassA) ->
+wait_for_msg(CityServerList) ->
   CityServerList1 = receive
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Termination messages
@@ -131,20 +118,21 @@ wait_for_msg(CityServerList, FeatureClassA) ->
     %% Server commands
     
     %% Commands sent to all city servers
-    {cmd, Cmd} ->
-      case Cmd of
-        city_list  -> send_cmd_to_all(CityServerList, city_list);
-        city_stats -> send_cmd_to_all(CityServerList, city_stats);
+    {cmd, CmdOrQuery} ->
+      case CmdOrQuery of
+        city_list  -> send_to_all(CityServerList, city_list);
+        city_stats -> send_to_all(CityServerList, city_stats);
 
         shutdown   ->
+          ?TRACE("~p sending shutdown command to all city servers",[get(my_name)]),
           put(shutdown, true),
-          send_cmd_to_all(CityServerList, shutdown);
+          send_to_all(CityServerList, shutdown);
 
-        trace_on   -> put(trace, true),  send_cmd_to_all(CityServerList, trace_on);
-        trace_off  -> put(trace, false), send_cmd_to_all(CityServerList, trace_off);
+        trace_on   -> put(trace, true),  send_to_all(CityServerList, trace_on);
+        trace_off  -> put(trace, false), send_to_all(CityServerList, trace_off);
 
         child_list -> io:format("Country server ~s uses child processes~n~s~n",[get(cc), format_proc_list(CityServerList)]);
-        _          -> io:format("~s received unknown command ~p~n",[get(my_name), Cmd])
+        _          -> io:format("~s received unknown command ~p~n",[get(my_name), CmdOrQuery])
       end,
       
       CityServerList;
@@ -175,7 +163,7 @@ wait_for_msg(CityServerList, FeatureClassA) ->
 
   end,
 
-  wait_for_msg(CityServerList1, FeatureClassA).
+  wait_for_msg(CityServerList1).
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Wait for responses from city servers
@@ -212,7 +200,7 @@ wait_for_results(Ref, N, ResultList) ->
 %% must be sent to all city servers for this country
 handle_query(Ref, CityServerList, {search_term, Query, whole_word, _, starts_with, false} = QS) ->
   ?TRACE("Sending query to all city servers"),
-  send_query_to_all(CityServerList, {Ref, QS, get(cc), Query, self()}),
+  send_to_all(CityServerList, {Ref, QS, get(cc), Query, self()}),
   wait_for_results(Ref, length(CityServerList), []);
 
 
@@ -225,13 +213,13 @@ handle_query(Ref, CityServerList, {search_term, [Char1 | _] = Query, whole_word,
   case lists:keyfind(Id, 4, CityServerList) of
     %% Yup, so pass query down to the relevant child process
     {pid, ChildPid, id, Id} ->
-      ?TRACE("Sending query to ~s city server for letter ~s",[get(cc), Id]),
+      ?TRACE("Sending query to ~s city server ~p",[get(cc), Id]),
       ChildPid ! {Ref, QS, get(cc), Query, self()},
       wait_for_results(Ref, 1, []);
 
     %% Nope, so ignore query
     false ->
-      ?TRACE("Country ~s has no city server for letter ~s", [get(cc), Id]),
+      ?TRACE("Country ~s has no server for cities starting with ~p", [get(cc), Id]),
       {results, Ref, []}
 
   end.
@@ -246,7 +234,7 @@ handle_exit(SomePid, Reason, CityServerList) ->
     %% Yup, so shut down all the city servers (which in turn, will cause this country_server to shut down with reason
     %% 'no_cities')
     true ->
-      send_cmd_to_all(CityServerList, shutdown),
+      send_to_all(CityServerList, shutdown),
       CityServerList;
 
     %% Nope, the country_manager is still alive
@@ -263,7 +251,7 @@ handle_exit(SomePid, Reason, CityServerList) ->
 
           case Reason of
             normal -> ok;
-            _      -> io:format("~p (~p) terminated with reason ~p~n", [CityServerId, SomePid, Reason])
+            _      -> io:format("City server ~p (~p) terminated with reason ~p~n", [CityServerId, SomePid, Reason])
           end,
     
           lists:keydelete(SomePid, 2, CityServerList)
@@ -296,13 +284,14 @@ distribute_cities([FCP_Rec | Rest], CityServerList) ->
     %% No child process exists yet for city names starting with this letter
     false ->
       country_manager ! {starting, distribute_cities, get(my_name), new_child, Char1},
-      [{pid, spawn_link(city_server, init, [self(), Char1, [FCP_Rec]]), id, [Char1]}];
+      [{pid, spawn_link(city_server, init, [self(), Char1, [FCP_Rec]]),
+         id, [Char1]}];
 
     %% A child process already exists to handle cities starting with this letter, so send the curemnt record to that
     %% process.  We do not expect a reply
-    {pid, ChildPid, id, _} ->
+    {pid, CityServerPid, id, _} ->
       % ?TRACE("Adding record for letter ~c",[Char1]),
-      ChildPid ! {add, FCP_Rec},
+      CityServerPid ! {add, FCP_Rec},
       []
   end,
 
@@ -310,18 +299,15 @@ distribute_cities([FCP_Rec | Rest], CityServerList) ->
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
-%% Send either a command or a query to all children
-send_cmd_to_all(CityServerList, Cmd) ->
-  lists:foreach(fun({pid, Pid, id, _}) -> Pid ! {cmd, Cmd} end, CityServerList).
-
-send_query_to_all(CityServerList, QueryDetails) ->
+%% Send either a command or a query to all city servers
+send_to_all(CityServerList, CmdOrQuery) ->
   lists:foreach(
-    fun({pid, Pid, id, _}) ->
-      Pid ! QueryDetails
+    fun({pid, Pid, id, _Id}) ->
+      ?TRACE("Sending ~p to city server ~p",[CmdOrQuery, _Id]),
+      Pid ! {cmd, CmdOrQuery}
     end,
     CityServerList
   ).
-
 
 
 %% ---------------------------------------------------------------------------------------------------------------------

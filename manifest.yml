@@ -6,7 +6,7 @@ applications:
 
   path:       .
   instances:  1
-  disk quota: 2G
+  disk quota: 2048M
   memory:     2048M
 
 

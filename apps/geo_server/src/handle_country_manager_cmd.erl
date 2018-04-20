@@ -35,7 +35,16 @@ init(Req=#{method := ?HTTP_GET}, State) ->
         <<"false">> -> country_manager ! {cmd, trace, off}
       end,
 
-      list_to_binary([<<"{\"status\":\"ok\", \"cmd\":\"set_debug\", \"param\":\"">>, Param, <<"\"}">>])
+      list_to_binary([<<"{\"status\":\"ok\", \"cmd\":\"set_debug\", \"param\":\"">>, Param, <<"\"}">>]);
+
+    <<"shutdown_all">> ->
+      country_manager ! {cmd, shutdown_all, self()},
+
+      Response = receive
+        {cmd_response, R} -> R
+      end,
+
+      list_to_binary([<<"{\"status\":\"">>, atom_to_binary(Response, utf8), <<"\", \"cmd\":\"shutdown_all\"}">>])
   end,
 
   {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, JsonResp, Req), State};

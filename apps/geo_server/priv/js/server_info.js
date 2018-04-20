@@ -14,7 +14,7 @@ var serverTable = []
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Server status command
-function fetch_server_info() {
+const fetch_server_info = () => {
   var xhr = new XMLHttpRequest()
 
   xhr.open("GET", "/server_status", true)
@@ -38,9 +38,12 @@ function fetch_server_info() {
 // ---------------------------------------------------------------------------------------------------------------------
 // Toggle country manage debug status
 // ---------------------------------------------------------------------------------------------------------------------
-function toggleCountryManagerDebug(state) { sendCountryManagerCmd("set_debug", state) }
+const startAllServers = () => sendCountryManagerCmd("start_all")
+const stopAllServers  = () => sendCountryManagerCmd("shutdown_all")
 
-function sendCountryManagerCmd(cmd, param) {
+const toggleCountryManagerDebug = state => sendCountryManagerCmd("set_debug", state)
+
+const sendCountryManagerCmd = (cmd, param) => {
   var xhr = new XMLHttpRequest()
 
   if (param === undefined)
@@ -51,9 +54,7 @@ function sendCountryManagerCmd(cmd, param) {
   xhr.onload = evt => {
     if (xhr.readyState === 4) {
       if (xhr.status === 200) {
-        if (cmd === "set_debug") {
-        // alert(xhr.responseText)
-      }
+        console.log(xhr.responseText)
       }
       else {
         show_error(xhr.statusText)
@@ -69,10 +70,10 @@ function sendCountryManagerCmd(cmd, param) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Start/stop country servers
 // ---------------------------------------------------------------------------------------------------------------------
-function startServer(cc) { sendServerCmd(cc,"start") }
-function stopServer(cc)  { sendServerCmd(cc,"shutdown") }
+const startServer = cc => sendServerCmd(cc,"start")
+const stopServer  = cc => sendServerCmd(cc,"shutdown")
 
-function sendServerCmd(cc,cmd) {
+const sendServerCmd = (cc,cmd) => {
   var xhr = new XMLHttpRequest()
 
   xhr.open("GET", "/server_cmd?country_code=" + cc + "&cmd=" + cmd, true)
@@ -99,14 +100,18 @@ function sendServerCmd(cc,cmd) {
 /* =====================================================================================================================
  * Display results from server
  */
-function show_status(responseText) {
+const show_status = responseText => {
   var serverObj    = JSON.parse(responseText)
   var serverStatus = document.getElementById("server_status")
 
-  var cbDiv  = build_trace_checkbox(serverObj.country_manager_trace)
-  var memDiv = build_memory_usage(serverObj.erlang_memory_usage)
+  var cbDiv   = build_trace_checkbox(serverObj.country_manager_trace)
+  var memDiv  = build_memory_usage(serverObj.erlang_memory_usage)
 
-  document.getElementById("server_status").innerHTML = htmlGenElement(cbDiv) + htmlGenElement(memDiv)
+  var cmdBtnsDiv = htmlElement("div", null, build_cmd_buttons())
+
+  document.getElementById("server_status").innerHTML = htmlGenElement(cbDiv) +
+    htmlGenElement(memDiv) +
+    htmlGenElement(cmdBtnsDiv)
 
   // Is the server table sorted by ZIP file size or by country name within continent?
   serverTable = (serverObj.servers[0].country_code === undefined)
@@ -116,14 +121,12 @@ function show_status(responseText) {
   document.getElementById("country_servers").innerHTML = htmlGenElement(serverTable)
 }
 
-function show_error(statusText) {
-  alert(statusText)
-}
+const show_error = statusText => alert(statusText)
 
-/* =====================================================================================================================
- * Create HTML elements for the server report
- */
-function build_trace_checkbox(state) {
+// ---------------------------------------------------------------------------------------------------------------------
+// Create HTML elements for the server report
+// ---------------------------------------------------------------------------------------------------------------------
+const build_trace_checkbox = state => {
   var id = "country_manager_trace"
 
   var toggleState = (state === "true") ? "false" : "true"
@@ -143,47 +146,55 @@ function build_trace_checkbox(state) {
   return htmlElement("div",null,[traceLabel, traceCB])
 }
 
-function build_memory_usage(mem) {
-  return htmlElement('p', null, "Erlang server memory usage = " + mem)
+const build_memory_usage = mem => htmlElement('p', null, "Erlang runtime memory usage = " + mem)
+
+const build_cmd_buttons = () => {
+  var startBtn = htmlElement('button',
+                             [htmlParam("onclick","alert('Not implemented yet')")],
+                             "Start all servers")
+  var stopBtn  = htmlElement('button',
+                             [htmlParam('onclick','stopAllServers()')],
+                             "Stop all servers")
+
+  return [startBtn, stopBtn]
 }
 
-function build_table_by_continent(servers) {
-  
-}
+// ---------------------------------------------------------------------------------------------------------------------
+// Create HTML elements dor server status table
+// ---------------------------------------------------------------------------------------------------------------------
+const build_table_by_continent = servers => { }
 
-function build_table_by_size(servers) {
+const build_table_by_size = servers => {
   var table_hdr  = build_column_headers()
   var table_body = servers.map(build_table_row)
 
   return htmlElement("table", null, [table_hdr].concat(table_body))
 }
 
-function build_table_row(country) {
+const build_table_row = country => {
   return htmlElement("tr",
                      [htmlParam("id","country_server_" + country.country_code.toLowerCase())],
                      build_table_columns(country))
 }
 
-function build_table_columns(country) {
-  return [
-      htmlElement("td", [TD_ALIGN("center")], build_action_button(country.substatus, country.country_code))
-    , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.country_code)
-    , htmlElement("td", [status_colour(country.status, country.substatus)], country.country_name)
-    , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.status)
-    , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.substatus)
-    , htmlElement("td", [TD_ALIGN("right")], country.progress)
-    , htmlElement("td", [TD_ALIGN("right")], country.city_count)
-    , htmlElement("td", [TD_ALIGN("right")], country.children)
-    , htmlElement("td", [TD_ALIGN("right")], country.started_at)
-    , htmlElement("td", [TD_ALIGN("right")], country.start_complete)
-    , htmlElement("td", [TD_ALIGN("right")], country.mem_usage)
-    , htmlElement("td", [TD_ALIGN("right")], country.zip_size)
+const build_table_columns = country => 
+  [ htmlElement("td", [TD_ALIGN("center")], build_action_button(country.substatus, country.country_code))
+  , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.country_code)
+  , htmlElement("td", [status_colour(country.status, country.substatus)], country.country_name)
+  , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.status)
+  , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.substatus)
+  , htmlElement("td", [TD_ALIGN("right")], country.progress)
+  , htmlElement("td", [TD_ALIGN("right")], country.city_count)
+  , htmlElement("td", [TD_ALIGN("right")], country.children)
+  , htmlElement("td", [TD_ALIGN("right")], country.started_at)
+  , htmlElement("td", [TD_ALIGN("right")], country.start_complete)
+  , htmlElement("td", [TD_ALIGN("right")], country.mem_usage)
+  , htmlElement("td", [TD_ALIGN("right")], country.zip_size)
   ]
-}
 
 // ---------------------------------------------------------------------------------------------------------------------
-function build_action_button(substatus, cc) {
-  var btn = htmlElement('button', [htmlParam('type','button')])
+const build_action_button = (substatus, cc) => {
+  var btn = htmlElement('button', [])
 
   if (substatus === "running") {
     btn.content = "Stop"
@@ -198,42 +209,35 @@ function build_action_button(substatus, cc) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-function build_continent_header(ContName) {
-  return htmlElement('tr', null, htmlElement('th', htmlParam('colspan', '12'), ContName))
-}
+const build_continent_header = ContName => htmlElement('tr', null, htmlElement('th', htmlParam('colspan', '12'), ContName))
 
 // ---------------------------------------------------------------------------------------------------------------------
-function build_column_headers() {
-  var reportColumns = [
-    htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Action')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'ISO')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Country')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Status')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Substatus')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Progress')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'City Count')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'City Servers')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Started At')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Startup Time')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Memory Usage')
-  , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'ZIP File Size')
-  ]
-
-  return htmlElement('tr', null, reportColumns)
-}
+const build_column_headers = () =>
+  htmlElement('tr', null, [ htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Action')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'ISO')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Country')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Status')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Substatus')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Progress')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'City Count')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'City Servers')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Started At')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Startup Time')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Memory Usage')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'ZIP File Size')
+                          ])
 
 // ---------------------------------------------------------------------------------------------------------------------
-function status_colour(status, substatus) {
-  return (status === "started")
-         ? (substatus === "running")
-           ? BG_GREEN()
-           : BG_YELLOW()
-         : (status === "starting")
-           ? BG_YELLOW()
-           : (status === "crashed")
-             ? BG_RED()
-             : BG_LIGHT_GREY()
-}
+var status_colour = (status, substatus) =>
+  (status === "started")
+   ? (substatus === "running")
+      ? BG_GREEN()
+      : BG_YELLOW()
+   : (status === "starting")
+      ? BG_YELLOW()
+      : (status === "crashed")
+         ? BG_RED()
+         : BG_LIGHT_GREY()
 
 /* =====================================================================================================================
  * HTML element functions

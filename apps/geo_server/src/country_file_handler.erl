@@ -16,67 +16,51 @@
 
 -define(PROGRESS_FRACTION, 0.01).
 
-%% Feature class P records (Population centres) having a pop[ulation below this
-%% limit will not be included in a country's FCP file
+%% Feature class P records (Population centres) having a pop[ulation below this limit will not be included in a
+%% country's FCP file
 -define(MIN_POPULATION, 500).
 
 
-%% -----------------------------------------------------------------------------
-%% Import either the internal feature class A & P country files if they exist,
-%% else import the full country text file.
-%% It is assumed that if the internal FCP file exists, then the internal FCA
-%% file also exists.
-country_file(CC) -> 
-  country_file(CC, filelib:file_size(?COUNTRY_FILE_FCP(CC))).
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Import the internal FCP file if it exists, else import the full country text file.
+country_file(CC) -> country_file(CC, filelib:file_size(?COUNTRY_FILE_FCP(CC))).
 
-%% -----------------------------------------------------------------------------
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Import country file.
-%% A non-zero size of the internal FCP country file is used to switch between
-%% importing the internal files, or importing the full country file
+%% A non-zero size of the internal FCP country file is used to switch between importing the internal files, or importing
+%% the full country file
 country_file(CC, 0) ->
-  ?TRACE("Internal FCA/FCP country files do not exist"),
+  ?TRACE("Internal FCP file does not exist"),
   Filename = ?COUNTRY_FILE_FULL(CC),
   Filesize = filelib:file_size(Filename),
-
-  %% Potentially need to wait at this point for the unzip process to complete
 
   ?TRACE("Importing ~s from full country file ~s", [format_as_binary_units(Filesize), Filename]),
 
   country_file(CC, file:open(Filename, [read]), Filesize);
 
-%% Internal FCA and FCP country files exist
+%% Internal FCP file exists
 country_file(CC, FCP_Filesize) ->
   FCP_Filename = ?COUNTRY_FILE_FCP(CC),
-
-  FCA_Filename = ?COUNTRY_FILE_FCA(CC),
-  FCA_Filesize = filelib:file_size(FCA_Filename),
-
-  ?TRACE("Importing ~s from internal FCA country file ~s",[format_as_binary_units(FCA_Filesize), FCA_Filename]),
   ?TRACE("Importing ~s from internal FCP country file ~s",[format_as_binary_units(FCP_Filesize), FCP_Filename]),
+  read_internal_country_file(file:read_file(FCP_Filename)).
 
-  FCA_File = read_internal_country_file(file:read_file(FCA_Filename)),
-  FCP_File = read_internal_country_file(file:read_file(FCP_Filename)),
-
-  % Restructure response to be consistent with country_file/3
-  {fca, FCA_File, fcp, FCP_File}.
-
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Read full country file
 country_file(CC, {ok, IoDevice}, Filesize) ->
-  {FCA, FCP} = read_country_file(CC, IoDevice, {[],[]}, Filesize, trunc(Filesize * ?PROGRESS_FRACTION)),
-  {fca, FCA, fcp, FCP};
+  read_country_file(CC, IoDevice, {[],[]}, Filesize, trunc(Filesize * ?PROGRESS_FRACTION));
 
 country_file(CC, {error, Reason}, _) ->
   {error, io_lib:format("File ~s~s.txt: ~p",[?TARGET_DIR, CC, Reason])}.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Read internal FCA or FCP country files
 read_internal_country_file({ok, BinData})   -> parse_internal_country_file(BinData);
 read_internal_country_file({error, Reason}) -> {error, Reason}.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Parse internal FCA or FCP country file
 %% Both files are Erlang lists of type #geoname_int
 parse_internal_country_file(BinData) ->
@@ -96,7 +80,7 @@ parse_internal_country_file(BinData) ->
   L.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Read a country file and create a list of geoname records
 read_country_file(CC, IoDevice, ListPair, Filesize, Stepsize) ->
   read_country_file(CC, IoDevice, io:get_line(IoDevice,""), ListPair, Filesize, Stepsize, 0).
@@ -105,13 +89,13 @@ read_country_file(CC, IoDevice, ListPair, Filesize, Stepsize) ->
 read_country_file(CC, IoDevice, eof, {FeatureClassA, FeatureClassP}, _, _, _) ->
   file:close(IoDevice),
 
-  %% Now that we have a list of FCA and FCP records, start the country hierarchy
-  %% server in order to add supplementary admin text to the FCP records.
-  %% This server is only needed when an FCP file is being created
+  %% Now that we have a list of FCA and FCP records, start the country hierarchy server in order to transfer
+  %% supplementary admin text from the FCA records into the FCP records.  This server is only needed whilst the FCP file
+  %% is being created.  After that, both the hiererachy_server and the FCA data can be deleted
   HierarchyServer = list_to_atom("country_hierarchy_" ++ string:lowercase(CC)),
   country_hierarchy:init(HierarchyServer, FeatureClassA),
 
-  %% Remember hierarchy server pid
+  %% Remember the hierarchy server's pid
   put(hierarchy_server_pid, whereis(HierarchyServer)),
 
   FeatureClassP1 = supplement_fcp_admin_text(HierarchyServer, FeatureClassP),
@@ -119,14 +103,12 @@ read_country_file(CC, IoDevice, eof, {FeatureClassA, FeatureClassP}, _, _, _) ->
   %% Stop the hierarchy server because it is no longer needed
   HierarchyServer ! {cmd, stop},
 
-  %% Since the feature code lists are Erlang terms, they must always be written
-  %% to file with a terminating "." otherwise, when being read back in again,
-  %% they will generate a syntax error in the term parser
-  file:write_file(?COUNTRY_FILE_FCA(CC), io_lib:format("~p.",[FeatureClassA])),
+  %% Since the feature code lists are Erlang terms, they must always be written to file with a terminating "."
+  %% otherwise, when being read back in again, they will generate a syntax error in the term parser
   file:write_file(?COUNTRY_FILE_FCP(CC), io_lib:format("~p.",[FeatureClassP1])),
 
   country_manager ! {starting, file_import, get(my_name), progress, complete},
-  {FeatureClassA, FeatureClassP1};
+  FeatureClassP1;
 
 %% Read country file when not eof
 read_country_file(CC, IoDevice, DataLine, {FeatureClassA, FeatureClassP}, Filesize, Stepsize, Progress) ->
@@ -143,7 +125,7 @@ read_country_file(CC, IoDevice, DataLine, {FeatureClassA, FeatureClassP}, Filesi
   read_country_file(CC, IoDevice, io:get_line(IoDevice,""), ListPair, FCA_Filesize, Stepsize, Progress1).
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Send a message to the country_manager for each unit of progress
 report_progress(Filesize, Stepsize, Linesize, Progress) ->
   Chunk = Linesize + Progress,
@@ -158,7 +140,7 @@ report_progress(Filesize, Stepsize, Linesize, Progress) ->
   
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Transform one line from a country file into a geoname record
 %% Various fields are skipped to minimise the record size
 make_geoname_record([[]], _, Acc) -> Acc;
@@ -203,12 +185,12 @@ make_geoname_record([_V | Rest], 17, Acc) -> make_geoname_record(string:split(Re
 make_geoname_record([V  | Rest], 18, Acc) -> make_geoname_record(string:split(Rest,"\t"), 19, Acc#geoname_int{timezone       = bin_or_undef(V)});
 make_geoname_record([_V | Rest], 19, Acc) -> make_geoname_record(string:split(Rest,"\t"),  0, Acc).
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Transform string data to binary for use in the geoname_int records
 bin_or_undef([]) -> undefined;
 bin_or_undef(V)  -> list_to_binary(V).
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Printable format of a geoname_int record
 % format_geoname_int_record(R) ->
 %   lists:flatten([io_lib:format("~p = ~p, ",[K,V]) || {K,V} <- kv_geoname_int_record(R)]).
@@ -219,13 +201,13 @@ bin_or_undef(V)  -> list_to_binary(V).
 
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Filter out geoname records that not related to countries or administrative areas
 keep_geoname_record(Rec) ->
   keep_feature_codes_for_class(Rec#geoname_int.feature_class, Rec, binary_to_integer(Rec#geoname_int.population)).
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Administrative areas
 keep_feature_codes_for_class(<<"A">>, Rec, _Pop) ->
   case Rec#geoname_int.feature_code of
@@ -263,7 +245,8 @@ keep_feature_codes_for_class(<<"P">>, Rec, Pop) when Pop >= ?MIN_POPULATION ->
 
 keep_feature_codes_for_class(_, _, _) -> false.
 
-%% -----------------------------------------------------------------------------
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Supplement FCP records with additional admin text
 supplement_fcp_admin_text(HierarchyServer, FCP) ->
   [ HierarchyServer ! {name_lookup, FCPRec, self()} || FCPRec <- FCP ],
@@ -271,8 +254,7 @@ supplement_fcp_admin_text(HierarchyServer, FCP) ->
 
 
 
-
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Wait for responses from country hierarchy server
 wait_for_results(0, Acc) -> Acc;
 wait_for_results(N, Acc) ->

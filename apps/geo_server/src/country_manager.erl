@@ -85,7 +85,8 @@ wait_for_msgs(CountryServerList) ->
 
   ServerStatusList1 = receive
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    %% Termination messages from country servers
+    %% Messages from processes that have crashed
+    %%
     {'EXIT', CountryServerPid, Reason} ->
       case Reason of
         {stopped, DeadServerName} ->
@@ -120,19 +121,16 @@ wait_for_msgs(CountryServerList) ->
 
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    %% Status messages from country servers
-
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% Messages from country servers reporting the how their startup sequence is progressing
+    %%
     %% Initialisation
     {starting, init, CountryServer, StartTime} ->
       set_server_status(CountryServerList, CountryServer, starting, init, init, [], StartTime);
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% File import (either full text file or internal FCA/FCP files)
     {starting, Substatus, CountryServer, progress, Progress} ->
       set_server_status(CountryServerList, CountryServer, starting, Substatus, Progress, [], undefined);
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Distribution of cities across city servers
     {starting, Substatus, CountryServer, new_child, Id} ->
       set_server_status(CountryServerList, CountryServer, starting, Substatus, complete, Id, undefined);
@@ -143,7 +141,6 @@ wait_for_msgs(CountryServerList) ->
     {starting, Substatus, CountryServer} ->
       set_server_status(CountryServerList, CountryServer, starting, Substatus, complete, [], undefined);
   
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Start up complete, server now running
     {started, running, CountryServer, CityCount, StartupComplete} ->
       ?TRACE("Country server ~p is up and running",[CountryServer]),
@@ -151,6 +148,8 @@ wait_for_msgs(CountryServerList) ->
     
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% TRACE on/off commands
+    %%
     %% Turn trace on/off just for the country manager
     {cmd, trace, on}  -> put(trace, true),  CountryServerList;
     {cmd, trace, off} -> put(trace, false), CountryServerList;
@@ -167,6 +166,8 @@ wait_for_msgs(CountryServerList) ->
       CountryServerList;
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% STATUS commands
+    %%
     %% Status commmands either from the console or some request handler
     {cmd, status} ->
       ?TRACE("Server status requested from console"),
@@ -209,18 +210,21 @@ wait_for_msgs(CountryServerList) ->
       CountryServerList;
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    %% Shutdown all country servers, but keep country manager up
+    %% SHUTDOWN messages
+    %%
+    %% Shutdown all country servers, but keep the country manager up
     {cmd, shutdown_all, RequestHandlerPid} ->
-      ?TRACE("Shutdown all country servers"),
+      ?TRACE("Shutdown all country servers but keep country_manager running"),
+      put(shutdown, false),
       CountryServerList1 = stop_all_country_servers(CountryServerList),
       
       RequestHandlerPid ! {cmd_response, all_shutdown},
 
       CountryServerList1;
 
-    %% Shutdown all country servers and then shutdown country manager
+    %% Shutdown all country servers and then shutdown the country manager
     {cmd, terminate, RequestHandlerPid} ->
-      %% Set process dictionary flag
+      %% Set process dictionary flag to indicate country_manager shutdown
       put(shutdown, true),
       ?TRACE("Shutdown all country servers then shutdown country manager"),
       CountryServerList1 = stop_all_country_servers(CountryServerList),
@@ -229,7 +233,6 @@ wait_for_msgs(CountryServerList) ->
 
       CountryServerList1;
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Shutdown a specific country server
     {cmd, shutdown, CountryCode, RequestHandlerPid} ->
       CountryServer = ?COUNTRY_SERVER_NAME(CountryCode),
@@ -252,6 +255,8 @@ wait_for_msgs(CountryServerList) ->
       end;
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% START messages
+    %%
     %% (Re)start specific country server
     {cmd, start, CountryCode, RequestHandlerPid} ->
       CountryServer = ?COUNTRY_SERVER_NAME(CountryCode),
@@ -545,7 +550,20 @@ format_country_server_record(R) ->
 stop_all_country_servers(CountryServerList) ->
   [ stop_country_server(Svr) || Svr <- CountryServerList ].
 
-%% Stop a country server
-stop_country_server(Svr) ->
+%% Stop a started country server
+stop_country_server(Svr) when Svr#country_server.status == started ->
+  ?TRACE("Stopping ~p",[Svr#country_server.name]),
   Svr#country_server.name ! {cmd, shutdown},
-  Svr#country_server{pid = undefined, status = stopped}.
+  Svr#country_server{
+    pid            = undefined
+  , status         = stopped
+  , substatus      = undefined
+  , progress       = undefined
+  , children       = undefined
+  , started_at     = undefined
+  , start_complete = undefined
+  , mem_usage      = undefined
+  };
+
+%% Ignore country servers that have a status other than 'started'
+stop_country_server(Svr) -> Svr.
