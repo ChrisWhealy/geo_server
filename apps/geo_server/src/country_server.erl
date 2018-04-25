@@ -6,8 +6,8 @@
 -created_by("chris.whealy@sap.com").
 
 -export([
-    init/1
-  , start/2
+    init/3
+  , start/4
 ]).
 
 -include("../include/trace.hrl").
@@ -24,16 +24,16 @@
 %% Initialise the country server
 %% We could be passed either the two character country code as a string, or the name of server as an atom depending on
 %% where the start command came from
-init(CC) when is_list(CC) ->
-  do_init(list_to_atom("country_server_" ++ string:lowercase(CC)));
+init(CC, Trace, NetTrace) when is_list(CC) ->
+  do_init(list_to_atom("country_server_" ++ string:lowercase(CC)), Trace, NetTrace);
 
-init(CC) when is_atom(CC) ->
-  do_init(CC).
+init(CC, Trace, NetTrace) when is_atom(CC) ->
+  do_init(CC, Trace, NetTrace).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Start the country server
-start(CC, ServerName) ->
+start(CC, ServerName, Trace, NetTrace) ->
   process_flag(trap_exit, true),
   
   %% Store various values in the process dictionary
@@ -42,8 +42,14 @@ start(CC, ServerName) ->
   put(cc, CC),
   put(city_count, unknown),
 
-  %% Switch trace off for normal operation
-  put(trace, false),
+  %% Trace flag supplied by the country manager
+  put(trace, Trace),
+
+  %% Set network trace on/off
+  case NetTrace of
+    true  -> ibrowse:trace_on();
+    _     -> ibrowse:trace_off()
+  end,
   
   %% Inform country manager that this server is starting up
   country_manager ! {starting, init, ServerName, ?NOW},
@@ -78,12 +84,12 @@ start(CC, ServerName) ->
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Internal startup function
-do_init(ServerName) ->
+do_init(ServerName, Trace, NetTrace) ->
   %% Has this country server already been registered?
   case whereis(ServerName) of
     undefined ->
       CC = extract_cc(ServerName),
-      CountryServerPid = spawn_link(?MODULE, start, [CC, ServerName]),
+      CountryServerPid = spawn_link(?MODULE, start, [CC, ServerName, Trace, NetTrace]),
       register(ServerName, CountryServerPid),
       CountryServerPid;
 
@@ -129,7 +135,7 @@ wait_for_msg(CityServerList) ->
           send_to_all(CityServerList, shutdown);
 
         trace_on   -> put(trace, true),  send_to_all(CityServerList, trace_on);
-        trace_off  -> put(trace, false), send_to_all(CityServerList, trace_off);
+        trace_off  -> send_to_all(CityServerList, trace_off), put(trace, false);
 
         child_list -> io:format("Country server ~s uses child processes~n~s~n",[get(cc), format_proc_list(CityServerList)]);
         _          -> io:format("~s received unknown command ~p~n",[get(my_name), CmdOrQuery])
@@ -303,7 +309,7 @@ distribute_cities([FCP_Rec | Rest], CityServerList) ->
 send_to_all(CityServerList, CmdOrQuery) ->
   lists:foreach(
     fun({pid, Pid, id, _Id}) ->
-      ?TRACE("Sending ~p to city server ~p",[CmdOrQuery, _Id]),
+      ?TRACE("Sending ~p to ~p city server ~p",[CmdOrQuery, get(cc), _Id]),
       Pid ! {cmd, CmdOrQuery}
     end,
     CityServerList

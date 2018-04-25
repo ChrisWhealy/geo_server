@@ -10,15 +10,18 @@
   , start/1
 ]).
 
+
 -include("../include/trace.hrl").
 -include("../include/now.hrl").
 -include("../include/utils.hrl").
 
 -define(COUNTRY_SERVER_NAME(CountryCode), list_to_atom("country_server_" ++ string:lowercase(CountryCode))).
 
-%% ---------------------------------------------------------------------------------------------------------------------
-%%                                                    P U B L I C   A P I
-%% ---------------------------------------------------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                 P U B L I C   A P I
+%%
+%% =====================================================================================================================
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Initialise the country manager
@@ -39,10 +42,11 @@ start(CountryList) ->
   Me = self(),
   process_flag(trap_exit, true),
 
-  % Debug trace
+  % Debug and network level trace flags
   put(trace, false),
+  put(network_trace, false),
 
-  ?TRACE("Country manager (~p) starting ~w country servers at ~s",[self(), length(CountryList), format_datetime(?NOW)]),
+  ?TRACE("Starting country manager (~p) with ~w country servers at ~s",[self(), length(CountryList), format_datetime(?NOW)]),
 
   CountryServerList = [
     %% Build the country server list with all servers in the initial status of stopped
@@ -56,6 +60,7 @@ start(CountryList) ->
        , continent    = Cont
        , country_code = CC
        , status       = stopped
+       , trace        = false
        }
      end)
     (Me, CountryCode, CountryName, Continent, get(trace))
@@ -66,6 +71,14 @@ start(CountryList) ->
   CountryServerList1 = wait_for_head_responses(CountryServerList),
 
   wait_for_msgs(lists:sort(fun(A,B) -> sort_country_server(A,B) end, CountryServerList1)).
+
+
+
+%% =====================================================================================================================
+%%
+%%                                                P R I V A T E   A P I
+%%
+%% =====================================================================================================================
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
@@ -84,7 +97,7 @@ wait_for_msgs(CountryServerList) ->
   end,
 
   ServerStatusList1 = receive
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% Messages from processes that have crashed
     %%
     {'EXIT', CountryServerPid, Reason} ->
@@ -120,14 +133,14 @@ wait_for_msgs(CountryServerList) ->
       end;
 
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% Messages from country servers reporting the how their startup sequence is progressing
     %%
     %% Initialisation
     {starting, init, CountryServer, StartTime} ->
       set_server_status(CountryServerList, CountryServer, starting, init, init, [], StartTime);
 
-    %% File import (either full text file or internal FCA/FCP files)
+    %% File import (either full text file or internal FCP files)
     {starting, Substatus, CountryServer, progress, Progress} ->
       set_server_status(CountryServerList, CountryServer, starting, Substatus, Progress, [], undefined);
 
@@ -147,94 +160,42 @@ wait_for_msgs(CountryServerList) ->
       set_server_running(CountryServerList, CountryServer, CityCount, StartupComplete);
     
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    %% TRACE on/off commands
-    %%
-    %% Turn trace on/off just for the country manager
-    {cmd, trace, on}  -> put(trace, true),  CountryServerList;
-    {cmd, trace, off} -> put(trace, false), CountryServerList;
-  
-    %% Turn trace on/off for the country manager and its country servers
-    {cmd, trace_on, all}  ->
-      put(trace, true),
-      lists:foreach(fun(S) -> S#country_server.name ! {cmd, trace_on} end, CountryServerList),
-      CountryServerList;
-    
-    {cmd, trace_off, all} ->
-      put(trace, false),
-      lists:foreach(fun(S) -> S#country_server.name ! {cmd, trace_off} end, CountryServerList),
-      CountryServerList;
-
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% STATUS commands
     %%
-    %% Status commmands either from the console or some request handler
-    {cmd, status} ->
-      ?TRACE("Server status requested from console"),
-      format_server_status_list(CountryServerList, all),
-      CountryServerList;
-
-    {cmd, status, starting} ->
-      ?TRACE("Status of starting servers requested from console"),
-      format_server_status_list(starting_servers(CountryServerList), starting),
-      CountryServerList;
-
-    {cmd, status, started} ->
-      ?TRACE("Status of started servers requested from console"),
-      format_server_status_list(started_servers(CountryServerList), started),
-      CountryServerList;
-  
+    %% Status commmands from some request handler
     {cmd, status, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       ?TRACE("Server status requested from request handler ~p",[RequestHandlerPid]),
-      RequestHandlerPid ! {country_server_list, CountryServerList, trace_on, get(trace)},
+      RequestHandlerPid ! {country_server_list, CountryServerList, trace_on, get(trace), network_trace, get(network_trace)},
       CountryServerList;
 
-    {cmd, status, CountryCode} when length(CountryCode) == 2 ->
-      ?TRACE("Status of server ~s requested from console",[CountryCode]),
-      ThisCountryServer = ?COUNTRY_SERVER_NAME(CountryCode),
-
-      case whereis(ThisCountryServer) of
-        undefined ->
-          io:format("No server found for country code ~s~n",[CountryCode]);
-
-        _ ->
-          Rec = lists:keyfind(ThisCountryServer, #country_server.name, CountryServerList),
-          format_server_status_list([Rec], ThisCountryServer)
-      end,
-
-      CountryServerList;
-
-    {cmd, status, started, RequestHandlerPid} ->
+    {cmd, status, started, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       ?TRACE("List of started servers requested by ~p",[RequestHandlerPid]),
       RequestHandlerPid ! {started_servers, started_servers(CountryServerList)},
       CountryServerList;
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% SHUTDOWN messages
     %%
     %% Shutdown all country servers, but keep the country manager up
-    {cmd, shutdown_all, RequestHandlerPid} ->
+    {cmd, shutdown_all, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       ?TRACE("Shutdown all country servers but keep country_manager running"),
       put(shutdown, false),
       CountryServerList1 = stop_all_country_servers(CountryServerList),
-      
-      RequestHandlerPid ! {cmd_response, all_shutdown},
-
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown_all, status = ok},
       CountryServerList1;
 
     %% Shutdown all country servers and then shutdown the country manager
-    {cmd, terminate, RequestHandlerPid} ->
+    {cmd, terminate, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       %% Set process dictionary flag to indicate country_manager shutdown
       put(shutdown, true),
-      ?TRACE("Shutdown all country servers then shutdown country manager"),
+      ?TRACE("Shutdown all country servers then shutdown the country manager"),
       CountryServerList1 = stop_all_country_servers(CountryServerList),
-      
-      RequestHandlerPid ! {cmd_response, goodbye},
-
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = terminate, status = goodbye},
       CountryServerList1;
 
     %% Shutdown a specific country server
-    {cmd, shutdown, CountryCode, RequestHandlerPid} ->
+    {cmd, shutdown, CountryCode, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       CountryServer = ?COUNTRY_SERVER_NAME(CountryCode),
       ?TRACE("Shutdown country server ~p",[CountryServer]),
 
@@ -247,44 +208,100 @@ wait_for_msgs(CountryServerList) ->
           CountryServer ! {cmd, shutdown},
 
           T  = lists:keyfind(CountryServer, #country_server.name, CountryServerList),
-          T1 = T#country_server{pid = undefined, status = stopped},
+          T1 = #country_server{
+                 name         = T#country_server.name
+               , country_name = T#country_server.country_name
+               , continent    = T#country_server.continent
+               , country_code = T#country_server.country_code
+               , status       = stopped
+               , trace        = false
+               },
 
-          RequestHandlerPid ! {cmd_response, T1},
+          RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, reason = T1},
 
           lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1)
       end;
 
-    %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% START messages
     %%
-    %% (Re)start specific country server
-    {cmd, start, CountryCode, RequestHandlerPid} ->
+    %% (Re)start a specific country server
+    {cmd, start, CountryCode, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       CountryServer = ?COUNTRY_SERVER_NAME(CountryCode),
 
-      ?TRACE("Start country server ~s",[CountryServer]),
+      ?TRACE("Starting country server ~s",[CountryServer]),
 
       case whereis(CountryServer) of
         undefined ->
           T  = lists:keyfind(CountryServer, #country_server.name, CountryServerList),
-          T1 = T#country_server{pid = country_server:init(CountryServer), status = starting},
+          T1 = T#country_server{pid = country_server:init(CountryServer, T#country_server.trace, get(network_trace)), status = starting},
 
-          RequestHandlerPid ! {cmd_response, T1},
+          RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, reason = T1},
 
           lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1);
 
         _Pid ->
           io:format("~p already started~n",[CountryServer]),
           CountryServerList
+      end;
+
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+    %% Network level trace on/off command
+    %%
+    {cmd, network_trace, TraceState,  RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+      case TraceState of
+        on  -> put(network_trace, true);
+        off -> put(network_trace, false)
+      end,
+
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = network_trace, status = ok},
+      CountryServerList;
+
+
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+    %% Debug trace on/off commands
+    %%
+    %% Turn trace on/off for the country manager
+    {cmd, trace, TraceState,  RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+      case TraceState of
+        on  -> put(trace, true);
+        off -> put(trace, false)
+      end,
+
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = set_debug, status = ok},
+      CountryServerList;
+
+    %% Turn trace on/off for an individual country server
+    %% The value bound to Trace must be either trace_on or trace_off
+    {cmd, Trace, CC, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+      CountryServerName = ?COUNTRY_SERVER_NAME(CC),
+      S = lists:keyfind(CountryServerName, #country_server.name, CountryServerList),
+
+      {Status, Reason, Trace1} = case S of
+        false ->
+          {error, no_such_country_server, trace_off};
+        _ ->
+          case S#country_server.substatus of
+            running ->
+              ?TRACE("Sending ~p to ~p",[Trace, CountryServerName]),
+              S#country_server.name ! {cmd, Trace},
+              {ok, undefined, Trace};
+            _ ->
+              {ok, undefined, Trace}
+          end
+        end,
+
+      RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = Trace, status = Status, reason = Reason},
+
+      %% Only update the CountryServerList if the trace state has changed
+      case S#country_server.trace == trace_state_to_boolean(Trace1) of
+        true  -> CountryServerList;
+        false -> lists:keyreplace(CountryServerName, #country_server.name, CountryServerList, update_trace(S, Trace1))
       end
   end,
 
   wait_for_msgs(ServerStatusList1).
 
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%%                                                P R I V A T E   A P I
-%% ---------------------------------------------------------------------------------------------------------------------
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Update ZIP file size in a country server status record
@@ -302,8 +319,31 @@ update_zip_size(Rec, ZipSize) ->
   , city_count     = Rec#country_server.city_count
   , started_at     = Rec#country_server.started_at
   , start_complete = Rec#country_server.start_complete
+  , trace          = Rec#country_server.trace
   , mem_usage      = Rec#country_server.mem_usage
   , zip_size       = ZipSize
+  }.
+
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Update trace flag in a country server status record
+update_trace(Rec, TraceState) ->
+  #country_server{
+    name           = Rec#country_server.name
+  , country_name   = Rec#country_server.country_name
+  , continent      = Rec#country_server.continent
+  , country_code   = Rec#country_server.country_code
+  , pid            = Rec#country_server.pid
+  , status         = Rec#country_server.status
+  , substatus      = Rec#country_server.substatus
+  , progress       = Rec#country_server.progress
+  , children       = Rec#country_server.children
+  , city_count     = Rec#country_server.city_count
+  , started_at     = Rec#country_server.started_at
+  , start_complete = Rec#country_server.start_complete
+  , trace          = trace_state_to_boolean(TraceState)
+  , mem_usage      = Rec#country_server.mem_usage
+  , zip_size       = Rec#country_server.zip_size
   }.
 
 
@@ -325,6 +365,7 @@ set_server_running(CountryServerList, Name, CityCount, StartComplete) ->
   , city_count     = CityCount
   , started_at     = Rec#country_server.started_at
   , start_complete = StartComplete
+  , trace          = Rec#country_server.trace
   , mem_usage      = memory_usage(Rec#country_server.name)
   , zip_size       = Rec#country_server.zip_size
   },
@@ -347,6 +388,7 @@ set_server_status(CountryServerList, Pid, crashed, Substatus, _, _, _) when is_p
   , country_code = Rec#country_server.country_code
   , status       = crashed
   , substatus    = Substatus
+  , trace        = false
   , mem_usage    = 0
   , zip_size     = Rec#country_server.zip_size
   },
@@ -365,6 +407,7 @@ set_server_status(CountryServerList, Name, stopped, Substatus, _, _, _) ->
   , country_code = Rec#country_server.country_code
   , status       = stopped
   , substatus    = Substatus
+  , trace        = false
   , mem_usage    = 0
   , zip_size     = Rec#country_server.zip_size
   },
@@ -414,6 +457,8 @@ set_server_status(CountryServerList, Name, Status, Substatus, Progress, Children
       _       -> Rec#country_server.start_complete
     end
 
+  , trace = Rec#country_server.trace
+
   , mem_usage = case Status of
       started -> memory_usage(Rec#country_server.name);
       _       -> 0
@@ -426,56 +471,6 @@ set_server_status(CountryServerList, Name, Status, Substatus, Progress, Children
 
   lists:keyreplace(Name, #country_server.name, CountryServerList, ServerStatus).
 
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Get memory usage of a particular process
-memory_usage(undefined) -> 0;
-
-memory_usage(Pid) when is_pid(Pid) ->
-  case process_info(Pid, memory) of
-    undefined   -> 0;
-    {memory, N} -> N
-  end;
-
-memory_usage(ProcessName) ->
-  memory_usage(whereis(ProcessName)).
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Format server status list
-format_server_status_list(CountryServerList, Status) when is_atom(Status) ->
-  Str1 = io_lib:format("~n* * * * * * * * * * Country Manager Status (~s) * * * * * * * * * *~n", [atom_to_list(Status)]),
-  Str2 = io_lib:format("~nCountry server count = ~w~n~n",[length(CountryServerList)]),
-
-  format_server_status_list(CountryServerList, [Str1] ++ [Str2]);
-
-format_server_status_list([], Acc) ->
-  io:format("~s~n",[lists:flatten(Acc)]);
-
-format_server_status_list([S | Rest], Acc) when is_record(S, country_server) ->
-  Str1 = io_lib:format("~p (~p) ~p/~p",
-                       [S#country_server.name,   S#country_server.pid,
-                        S#country_server.status, S#country_server.substatus]),
-  
-  Str2 = case S#country_server.status of
-    starting -> io_lib:format(", Progress: ~p%", [S#country_server.progress]);
-    _        -> ""
-  end,
-
-  Str3 = io_lib:format(", Started at: ~s", [format_datetime(S#country_server.started_at)]),
-
-  Str4 = case S#country_server.start_complete of
-      undefined -> "";
-      Completed -> io_lib:format(", Start duration: ~s",
-                                 [format_seconds(time_diff(Completed, S#country_server.started_at))])
-  end,
-
-  Str5 = case length(S#country_server.children) of
-    0 -> io_lib:format("~n",[]);
-    _ -> io_lib:format(", Children = ~p~n", [S#country_server.children])
-  end,
-
-  format_server_status_list(Rest, Acc ++ [Str1] ++ [Str2] ++ [Str3] ++ [Str4] ++ [Str5]).
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% List servers by status
@@ -544,7 +539,7 @@ wait_for_head_responses(CSList, Acc) ->
 format_country_server_record(R) ->
   lists:flatten([io_lib:format("~p = ~p, ",[K,V]) || {K,V} <- kv_country_server_record(R)]).
 
-  
+
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Stop all country servers
 stop_all_country_servers(CountryServerList) ->
@@ -562,8 +557,16 @@ stop_country_server(Svr) when Svr#country_server.status == started ->
   , children       = undefined
   , started_at     = undefined
   , start_complete = undefined
+  , trace          = false
   , mem_usage      = undefined
   };
 
 %% Ignore country servers that have a status other than 'started'
 stop_country_server(Svr) -> Svr.
+
+
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Convert trace state to Boolean atom
+trace_state_to_boolean(trace_on)  -> true;
+trace_state_to_boolean(trace_off) -> false.

@@ -15,6 +15,7 @@
 , children               %% List of child processes :: List[char()]
 , started_at             %% Custom timestamp for server start time  :: string()
 , start_complete         %% Custom timestamp for server start up completion time :: string()
+, trace                  %% Trace active   :: Boolean atom()
 , mem_usage              %% Server's memory usage     :: integer()
 , zip_size               %% Size of country ZIP file  :: integer()
 }).

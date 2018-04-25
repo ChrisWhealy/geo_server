@@ -20,21 +20,34 @@
 
 -define(SUP_FLAGS, {?RESTART_STRATEGY, ?INTENSITY, ?PERIOD}).
 
+%% -----------------------------------------------------------------------------
+%% Server callbacks
+%% -----------------------------------------------------------------------------
 start(Countries) ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, Countries).
 
-%% -----------------------------------------------------------------------------
-%% Server startup callback
-%% -----------------------------------------------------------------------------
 init(Countries) ->
   % Trace flow
   put(trace, true),
 
-  ?TRACE("Supervisor starting with ~p countries",[length(Countries)]),
+  ?TRACE("Supervisor initialising country_manager with ~p countries",[length(Countries)]),
   {ok, {?SUP_FLAGS, [ {country_manager, {country_manager, init, [Countries]}, permanent, brutal_kill, supervisor, [country_manager]} ]
        }
   }.
 
 stop(_State) ->
-  country_manager ! {cmd, shutdown}.
+  ?TRACE("Supervisor shutting down"),
+
+  %% Tell the country_manager to shut down
+  country_manager ! {cmd, terminate, self()},
+
+  % Wait for shutdown response
+  receive
+    {cmd_response, goodbye} ->
+      exit(normal);
+
+    SomeVal ->
+      io:format("geo_server supervisor received an unexpected response after issuing the 'terminate' command: ~p~n",[SomeVal]),
+      exit({supervisor_shutdown_error, SomeVal})
+  end.
 

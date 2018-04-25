@@ -6,8 +6,9 @@
 -created_by("chris.whealy@sap.com").
 
 -export([
-  country_file/1
-]).
+    country_file/1
+  , read_internal_country_file/4
+  ]).
 
 -include("../include/trace.hrl").
 -include("../include/utils.hrl").
@@ -43,7 +44,11 @@ country_file(CC, 0) ->
 country_file(CC, FCP_Filesize) ->
   FCP_Filename = ?COUNTRY_FILE_FCP(CC),
   ?TRACE("Importing ~s from internal FCP country file ~s",[format_as_binary_units(FCP_Filesize), FCP_Filename]),
-  read_internal_country_file(file:read_file(FCP_Filename)).
+  spawn(?MODULE, read_internal_country_file, [FCP_Filename, self(), get(my_name), get(trace)]),
+  
+  receive
+    Response -> Response
+  end.
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Read full country file
@@ -56,27 +61,39 @@ country_file(CC, {error, Reason}, _) ->
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Read internal FCA or FCP country files
-read_internal_country_file({ok, BinData})   -> parse_internal_country_file(BinData);
-read_internal_country_file({error, Reason}) -> {error, Reason}.
+read_internal_country_file({ok, BinData}, CallerPid, MyName, TraceOn) ->
+  put(trace, TraceOn),
+  CallerPid ! parse_fcp_file(BinData, MyName);
+
+read_internal_country_file({error, Reason}, CallerPid, _MyName, _TraceOn) ->
+  CallerPid ! {error, Reason};
+
+read_internal_country_file(FCP_Filename, CallerPid, MyName, TraceOn) ->
+  read_internal_country_file(file:read_file(FCP_Filename), CallerPid, MyName, TraceOn).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
-%% Parse internal FCA or FCP country file
-%% Both files are Erlang lists of type #geoname_int
-parse_internal_country_file(BinData) ->
-  country_manager ! {starting, loading_internal_file, get(my_name), progress, 0},
+%% Parse internal FCP country file.  This is an Erlang lists of type #geoname_int
+parse_fcp_file(BinData, MyName) ->
+  country_manager ! {starting, loading_internal_file, MyName, progress, 0},
+  ?TRACE("Starting memory usage: ~s",[format_as_binary_units(memory_usage(self()))]),
+  ?TRACE("FCP file: Converting binary data to list"),
   StrData        = erlang:binary_to_list(BinData),
-
-  country_manager ! {starting, scanning_internal_file, get(my_name), progress, 25},
+  
+  country_manager ! {starting, scanning_internal_file, MyName, progress, 25},
+  ?TRACE("FCP file: Scanning list"),
   {ok, Terms, _} = erl_scan:string(StrData),
-
-  country_manager ! {starting, parsing_internal_file, get(my_name), progress, 25},
+  
+  country_manager ! {starting, parsing_internal_file, MyName, progress, 25},
+  ?TRACE("FCP file: Parsing terms"),
   {ok, Exprs}    = erl_parse:parse_exprs(Terms),
-
-  country_manager ! {starting, evaluating_internal_file, get(my_name), progress, 25},
+  
+  country_manager ! {starting, evaluating_internal_file, MyName, progress, 25},
+  ?TRACE("FCP file: Evaluating expressions"),
   {value, L, _}  = erl_eval:exprs(Exprs, []),
   
-  country_manager ! {starting, file_import, get(my_name), progress, complete},
+  country_manager ! {starting, file_import, MyName, progress, complete},
+  ?TRACE("Ending memory usage: ~s",[format_as_binary_units(memory_usage(self()))]),
   L.
 
 
@@ -189,16 +206,6 @@ make_geoname_record([_V | Rest], 19, Acc) -> make_geoname_record(string:split(Re
 %% Transform string data to binary for use in the geoname_int records
 bin_or_undef([]) -> undefined;
 bin_or_undef(V)  -> list_to_binary(V).
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Printable format of a geoname_int record
-% format_geoname_int_record(R) ->
-%   lists:flatten([io_lib:format("~p = ~p, ",[K,V]) || {K,V} <- kv_geoname_int_record(R)]).
-
-%% Create a KV list from a geoname_int record and a record instance
-% kv_geoname_int_record(R) ->
-%   lists:zip(record_info(fields,geoname_int), tl(tuple_to_list(R))).
-
 
 
 %% ---------------------------------------------------------------------------------------------------------------------

@@ -25,26 +25,35 @@ init(Req=#{method := ?HTTP_GET}, State) ->
   ?TRACE("Got command ~p from client",[Cmd]),
 
   %% Send the command to the country manager
-  JsonResp = case Cmd of
+  case Cmd of
     %% The name of the server to be started must also appear in the query string
     <<"set_debug">> ->
       #{param := Param} = cowboy_req:match_qs([param], Req),
 
       case Param of
-        <<"true">>  -> country_manager ! {cmd, trace, on};
-        <<"false">> -> country_manager ! {cmd, trace, off}
-      end,
+        <<"true">>  -> country_manager ! {cmd, trace, on,  self()};
+        <<"false">> -> country_manager ! {cmd, trace, off, self()}
+      end;
 
-      list_to_binary([<<"{\"status\":\"ok\", \"cmd\":\"set_debug\", \"param\":\"">>, Param, <<"\"}">>]);
+    <<"network_trace">> ->
+      #{param := Param} = cowboy_req:match_qs([param], Req),
+
+      case Param of
+        <<"true">>  -> country_manager ! {cmd, network_trace, on,  self()};
+        <<"false">> -> country_manager ! {cmd, network_trace, off, self()}
+      end;
 
     <<"shutdown_all">> ->
-      country_manager ! {cmd, shutdown_all, self()},
+      country_manager ! {cmd, shutdown_all, self()}
+  end,
 
-      Response = receive
-        {cmd_response, R} -> R
-      end,
+  %% Wait for command response
+  JsonResp = receive
+    CmdResponse when is_record(CmdResponse, cmd_response) ->
+      record_to_json(cmd_response, CmdResponse);
 
-      list_to_binary([<<"{\"status\":\"">>, atom_to_binary(Response, utf8), <<"\", \"cmd\":\"shutdown_all\"}">>])
+    SomeVal ->
+      record_to_json(cmd_response, #cmd_response{from_server = country_manager, cmd = Cmd, status = error, reason = SomeVal})
   end,
 
   {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, JsonResp, Req), State};

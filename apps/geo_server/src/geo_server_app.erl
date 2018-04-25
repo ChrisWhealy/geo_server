@@ -79,17 +79,20 @@ start(_Type, _Args) ->
   %% Define routes
   Dispatch = cowboy_router:compile([
 		{'_', [
-			{"/",                    handle_root,                []}
-     ,{"/server_status",       handle_server_status,       []}
-     ,{"/server_cmd",          handle_server_cmd,          []}
-     ,{"/client_info",         handle_client_info,         []}
-     ,{"/search",              handle_search,              []}
-     ,{"/country_manager_cmd", handle_country_manager_cmd, []}
+      %% Browser interfaces
+      {"/",                    handle_root,                []}
+      ,{"/server_status",       handle_server_status,       []}
+      ,{"/client_info",         handle_client_info,         []}
+      ,{"/search",              handle_search,              []}
 
-     %% Handle static files
-     ,{"/server_info",         cowboy_static, {priv_file, geo_server, "html/server_info.html"}}
-     ,{"/js/server_info.js",   cowboy_static, {priv_file, geo_server, "js/server_info.js"}}
-     ,{"/css/server_info.css", cowboy_static, {priv_file, geo_server, "css/server_info.css"}}
+      %% Command API
+      ,{"/country_manager_cmd", handle_country_manager_cmd, []}
+      ,{"/country_server_cmd",  handle_country_server_cmd,  []}
+
+      %% Handle static files
+      ,{"/server_info",         cowboy_static, {priv_file, geo_server, "html/server_info.html"}}
+      ,{"/js/server_info.js",   cowboy_static, {priv_file, geo_server, "js/server_info.js"}}
+      ,{"/css/server_info.css", cowboy_static, {priv_file, geo_server, "css/server_info.css"}}
 		]}
 	]),
 

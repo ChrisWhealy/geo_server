@@ -24,8 +24,9 @@ init(Req=#{method := ?HTTP_GET}, _State) ->
   country_manager ! {cmd, status, self()},
 
   ServerStatusDetails = receive
-    {country_server_list, ServerStatusList, trace_on, TraceOn} ->
-      server_status_details(ServerStatusList, TraceOn)
+    {country_server_list, ServerStatusList,
+     trace_on,            Trace,
+     network_trace,       NetworkTrace} -> server_status_details(ServerStatusList, Trace, NetworkTrace)
   end,
 
   {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, ServerStatusDetails, Req), _State};
@@ -42,14 +43,15 @@ init(Req, _State) ->
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Format server status list
-server_status_details(ServerStatusList, TraceOn) ->
-  CountryManagerTrace = make_json_prop(country_manager_trace, TraceOn),
+server_status_details(ServerStatusList, Trace, NetTrace) ->
+  CountryManagerTrace = make_json_prop(country_manager_trace, Trace),
+  NetworkTrace        = make_json_prop(network_trace,         NetTrace),
   MemoryUsage         = make_json_prop(erlang_memory_usage,   format_as_binary_units(erlang:memory(total))),
 
   % Servers = make_json_prop(servers, servers_by_continent(ServerStatusList)),
   Servers = make_json_prop(servers, servers_by_size(ServerStatusList)),
 
-  make_json_obj([CountryManagerTrace, MemoryUsage, Servers]).
+  make_json_obj([CountryManagerTrace, NetworkTrace, MemoryUsage, Servers]).
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Transform server status list into an array of JSON objects sorted by Zip size

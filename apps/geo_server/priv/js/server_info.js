@@ -8,6 +8,10 @@
 
 var serverTable = []
 
+const url_country_manager_cmd = "/country_manager_cmd"
+const url_country_server_cmd  = "/country_server_cmd"
+const url_server_status       = "/server_status"
+
 /* =====================================================================================================================
  * XHR requests
  */
@@ -17,7 +21,7 @@ var serverTable = []
 const fetch_server_info = () => {
   var xhr = new XMLHttpRequest()
 
-  xhr.open("GET", "/server_status", true)
+  xhr.open("GET", url_server_status, true)
 
   xhr.onload = evt => {
     if (xhr.readyState === 4) {
@@ -36,20 +40,26 @@ const fetch_server_info = () => {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Toggle country manage debug status
+// Send commands to the country manager
 // ---------------------------------------------------------------------------------------------------------------------
 const startAllServers = () => sendCountryManagerCmd("start_all")
 const stopAllServers  = () => sendCountryManagerCmd("shutdown_all")
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Toggle country manager debug status
+// ---------------------------------------------------------------------------------------------------------------------
 const toggleCountryManagerDebug = state => sendCountryManagerCmd("set_debug", state)
+const toggleNetworkTrace        = state => sendCountryManagerCmd("network_trace", state)
+
+const toggleCountryServerDebug = (cc, state) => sendCountryServerCmd(cc, (state ? "trace_on" : "trace_off"))
 
 const sendCountryManagerCmd = (cmd, param) => {
   var xhr = new XMLHttpRequest()
 
   if (param === undefined)
-    xhr.open("GET", "/country_manager_cmd?cmd=" + cmd, true)
+    xhr.open("GET", url_country_manager_cmd + "?cmd=" + cmd, true)
   else
-    xhr.open("GET", "/country_manager_cmd?cmd=" + cmd + "&param=" + param, true)
+    xhr.open("GET", url_country_manager_cmd + "?cmd=" + cmd + "&param=" + param, true)
 
   xhr.onload = evt => {
     if (xhr.readyState === 4) {
@@ -68,23 +78,36 @@ const sendCountryManagerCmd = (cmd, param) => {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Start/stop country servers
+// Send commands to individual country servers
 // ---------------------------------------------------------------------------------------------------------------------
-const startServer = cc => sendServerCmd(cc,"start")
-const stopServer  = cc => sendServerCmd(cc,"shutdown")
+const startServer = cc => sendCountryServerCmd(cc,"start")
+const stopServer  = cc => sendCountryServerCmd(cc,"shutdown")
 
-const sendServerCmd = (cc,cmd) => {
+const sendCountryServerCmd = (cc,cmd) => {
   var xhr = new XMLHttpRequest()
 
-  xhr.open("GET", "/server_cmd?country_code=" + cc + "&cmd=" + cmd, true)
+  xhr.open("GET", url_country_server_cmd + "?country_code=" + cc + "&cmd=" + cmd, true)
 
   xhr.onload = evt => {
     if (xhr.readyState === 4) {
       if (xhr.status === 200) {
-        var newRec = JSON.parse(xhr.responseText)
-        var oldRec = document.getElementById(newRec.name)
+        var cmd_response = JSON.parse(xhr.responseText)
 
-        oldRec.innerHTML = build_table_columns(newRec).map(htmlGenElement).join('\n')
+        if (cmd_response.status && cmd_response.status === "error") {
+          alert(cmd_response.from_server + " " +
+                cmd_response.cmd + " " +
+                cmd_response.status + " " +
+                cmd_response.reason)
+        }
+        else {
+          if (cmd_response.cmd === "start" ||
+              cmd_response.cmd === "shutdown") {
+            var newRec = cmd_response.reason
+            var oldRec = document.getElementById(newRec.name)
+
+            oldRec.innerHTML = build_table_columns(newRec).map(htmlGenElement).join('\n')
+          }
+        }
       }
       else {
         show_error(xhr.statusText)
@@ -104,12 +127,15 @@ const show_status = responseText => {
   var serverObj    = JSON.parse(responseText)
   var serverStatus = document.getElementById("server_status")
 
-  var cbDiv   = build_trace_checkbox(serverObj.country_manager_trace)
+  var cmDiv   = build_cm_trace_checkbox(serverObj.country_manager_trace)
+  var netDiv  = build_net_trace_checkbox(serverObj.network_trace)
   var memDiv  = build_memory_usage(serverObj.erlang_memory_usage)
 
   var cmdBtnsDiv = htmlElement("div", null, build_cmd_buttons())
 
-  document.getElementById("server_status").innerHTML = htmlGenElement(cbDiv) +
+  document.getElementById("server_status").innerHTML =
+    htmlGenElement(cmDiv) +
+    htmlGenElement(netDiv) +
     htmlGenElement(memDiv) +
     htmlGenElement(cmdBtnsDiv)
 
@@ -126,16 +152,14 @@ const show_error = statusText => alert(statusText)
 // ---------------------------------------------------------------------------------------------------------------------
 // Create HTML elements for the server report
 // ---------------------------------------------------------------------------------------------------------------------
-const build_trace_checkbox = state => {
+const build_cm_trace_checkbox = state => {
   var id = "country_manager_trace"
-
-  var toggleState = (state === "true") ? "false" : "true"
 
   var cbParams = [
       htmlParam("name", id)
     , htmlParam("id",   id) 
     , htmlParam("type", "checkbox") 
-    , htmlParam("onclick", "toggleCountryManagerDebug('" + toggleState + "')") 
+    , htmlParam("onclick", "toggleCountryManagerDebug(this.checked)") 
   ]
 
   if (state === "true") cbParams.push(htmlParam("checked"))
@@ -144,6 +168,39 @@ const build_trace_checkbox = state => {
   var traceLabel = htmlElement('label', htmlParam("htmlFor", id), "Country manager debug trace")
 
   return htmlElement("div",null,[traceLabel, traceCB])
+}
+
+const build_net_trace_checkbox = state => {
+  var id = "network_trace"
+
+  var cbParams = [
+      htmlParam("name", id)
+    , htmlParam("id",   id) 
+    , htmlParam("type", "checkbox") 
+    , htmlParam("onclick", "toggleNetworkTrace(this.checked)") 
+  ]
+
+  if (state === "true") cbParams.push(htmlParam("checked"))
+
+  var traceCB    = htmlElement('input', cbParams)
+  var traceLabel = htmlElement('label', htmlParam("htmlFor", id), "Network level trace")
+
+  return htmlElement("div",null,[traceLabel, traceCB])
+}
+
+const build_trace_checkbox = (cc, state) => {
+  var id = "country_server_" + cc + "_trace"
+
+  var cbParams = [
+      htmlParam("name", id)
+    , htmlParam("id",   id) 
+    , htmlParam("type", "checkbox") 
+    , htmlParam("onclick", "toggleCountryServerDebug('" + cc + "',this.checked)") 
+  ]
+
+  if (state === "true") cbParams.push(htmlParam("checked"))
+
+  return htmlElement('input', cbParams)
 }
 
 const build_memory_usage = mem => htmlElement('p', null, "Erlang runtime memory usage = " + mem)
@@ -160,7 +217,7 @@ const build_cmd_buttons = () => {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Create HTML elements dor server status table
+// Create HTML elements for server status table
 // ---------------------------------------------------------------------------------------------------------------------
 const build_table_by_continent = servers => { }
 
@@ -179,6 +236,7 @@ const build_table_row = country => {
 
 const build_table_columns = country => 
   [ htmlElement("td", [TD_ALIGN("center")], build_action_button(country.substatus, country.country_code))
+  , htmlElement("td", [TD_ALIGN("center")], build_trace_checkbox(country.country_code, country.trace))
   , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.country_code)
   , htmlElement("td", [status_colour(country.status, country.substatus)], country.country_name)
   , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.status)
@@ -214,6 +272,7 @@ const build_continent_header = ContName => htmlElement('tr', null, htmlElement('
 // ---------------------------------------------------------------------------------------------------------------------
 const build_column_headers = () =>
   htmlElement('tr', null, [ htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Action')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Trace')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'ISO')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Country')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Status')

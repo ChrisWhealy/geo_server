@@ -1,8 +1,9 @@
 
+-include("../include/rec_cmd_response.hrl").
 -include("../include/rec_country_server.hrl").
 
 %% =====================================================================================================================
-%% Format size in binary units Kb, Mb or Gb
+%% Format integer as binary units Kb, Mb or Gb
 %% =====================================================================================================================
 kb() -> 1024.
 mb() -> kb() * 1024.
@@ -20,6 +21,23 @@ format_as_binary_units_int(N, Unit, UnitStr) ->
   WholeUnits = N div Unit,
   Rem = (N - (WholeUnits * Unit)) / Unit,
   io_lib:format("~.2f ~s",[WholeUnits + Rem, UnitStr]).
+
+
+%% =====================================================================================================================
+%% Get memory usage of a particular process
+%% =====================================================================================================================
+memory_usage(undefined)   -> 0;
+memory_usage("undefined") -> 0;
+memory_usage("Undefined") -> 0;
+
+memory_usage(Pid) when is_pid(Pid) ->
+  case process_info(Pid, memory) of
+    undefined   -> 0;
+    {memory, N} -> N
+  end;
+
+memory_usage(ProcessName) ->
+  memory_usage(whereis(ProcessName)).
 
 
 
@@ -75,9 +93,27 @@ make_json_obj(Prop)                      -> list_to_binary([<<"{">>, Prop, <<"}"
 
 %% =====================================================================================================================
 %%
-%%        Convert record into a simple JSON object
+%% Convert various records into a simple JSON object
 %%
 %% =====================================================================================================================
+
+record_to_json(cmd_response, Rec) ->
+  %% Check if the "reason" field contains a country_server record
+  KV = case is_record(Rec#cmd_response.reason, country_server) of
+    true  ->
+      kv_cmd_response_record(#cmd_response{
+        from_server = Rec#cmd_response.from_server
+      , cmd         = Rec#cmd_response.cmd
+      , status      = Rec#cmd_response.status
+      , reason      = record_to_json(country_server, Rec#cmd_response.reason)
+      });
+
+    false -> 
+      kv_cmd_response_record(Rec)
+  end,
+
+  kv_to_json(KV);
+
 
 record_to_json(country_server, Rec) ->
   %% Format all internal values in the record
@@ -94,12 +130,16 @@ record_to_json(country_server, Rec) ->
     , children       = len(Rec#country_server.children)
     , started_at     = format_datetime(Rec#country_server.started_at)
     , start_complete = format_seconds(time_diff(Rec#country_server.start_complete, Rec#country_server.started_at))
+    , trace          = Rec#country_server.trace
     , mem_usage      = format_as_binary_units(Rec#country_server.mem_usage)
     , zip_size       = format_as_binary_units(Rec#country_server.zip_size)
     },
 
   kv_to_json(kv_country_server_record(R1)).
 
+
+%% Create a KV list from a country_server record and a record instance
+kv_cmd_response_record(R) -> lists:zip(record_info(fields, cmd_response), tl(tuple_to_list(R))).
 
 %% Create a KV list from a country_server record and a record instance
 kv_country_server_record(R) -> lists:zip(record_info(fields, country_server), tl(tuple_to_list(R))).
