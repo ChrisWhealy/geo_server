@@ -1,10 +1,10 @@
 #  geo_server
 
-A web server application that accepts a city name as a search criteria, and returns all cities with a matching name.
+A web server to provide worldwide town/city name lookup functionality.  The server accepts a text string of 3 or more characters as a search criteria and returns all towns and cities with a matching name.
 
 This server is written in [Erlang](http://www.erlang.org/) using the [OTP framework](http://erlang.org/doc/) and the [Cowboy web server](https://ninenines.eu/)
 
-All geographic information used by this server is obtained from [http://www.geonames.org](http://www.geonames.org).
+All geographic information supplied by this server is obtained from [http://www.geonames.org](http://www.geonames.org).
 
 ## Clone Git Repository
 
@@ -28,50 +28,48 @@ Deploy to Cloud Foundry using the following community build pack for Erlang:
 
 ### Country Manager
 
-When this app is deployed to CF and started, the `country_manager` process starts.  This is the supervisor responsible for managing the lifecycle of all country servers.  One country server is available for each country listed in the GeoNames file [countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt).
+When this app is deployed to CF and started, the `country_manager` process starts.  This is the supervisor responsible for managing the lifecycle of all country servers.  One country server is created for each country listed in the GeoNames file [countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt).
 
-By default, none of the country servers are started automatically because doing so would create a memory usage spike that exceeds the current Cloud Foundry instance memory limit of 2Gb.  Therefore, country servers must be started manually, one at a time, starting with the largest.
+After deployment to Cloud Foundry, by default, none of the country servers are started.
 
 ### Admin Interface
 
-In order to start one or more country servers, you must use the `geo-server` admin interface.  This is accessed by adding `/server_info` to the deployed URL.  Currently, no authentication is required to access this page.
+In order to start one or more country servers, you must use the `geo-server` admin interface.  This is accessed by adding `/server_info` to `geo-server`'s deployed URL.  For instance <https://geo-server.cfapps.us10.hana.ondemand.com/server_info>
 
-If you do not start any country servers, all search queries to the `geo-server` will return an empty JSON array!
+Currently, no authentication is required to access this page.
 
-### Country Server Startup Sequence
+If you do not start any country servers, all search queries will return an empty JSON array!
 
-The country servers should be started one at a time, in descending order of ZIP file size.  This is due to the fact that currently, unzipping a file causes a memory usage spike - the larger the ZIP file, the larger the spike.
+### Country Server Startup
 
-#### Startup Order
+Once connected to the admin screen, you can either start all the servers at once by clicking on the "Start all servers" button, or individual country servers can be started as required.
 
-All country servers can be started - except for the United States! This ZIP file is currently too large to unzip within the current 2Gb instance limit.  When this limit is raised to 4Gb, this issue should no longer be a problem.
+#### Startup Processing
 
-Apart from the United States, start each country server starting from the largest.
+The following startup sequence is performed for each country server:
 
-Once, you've pressed the start button next to a country, wait for the substatus to change from `country_file_download` to `file_import` (you must refresh the browser screen to see the substatus change).  Once this happens, you can then start the next country server.
+1. When a country server is started for the first time, a [ZIP file](http://download.geonames.org/export/dump/) containing all the geographic information for that country is downloaded from the GeoNames website.
 
-For countries whose ZIP files are larger than about 3Mb, it is safer to start the country servers one at a time.  For country servers with smaller ZIP files, you can start three or four at a time.
+1. Once unzipped, the resulting text file contains a large amount of geographic information - much of which is not relevant for `geo-server`'s requirements.  Therefore, the text file is scanned only for those records having a feature class of "P" (population centres) and "A" (administrative areas).  All other records are ignored.
 
-For the smallest country servers, you can start twenty or so at one time.
-
-### Country Server Startup Processing
-
-When an individual country server is started, the following sequence of events takes place:
-
-* The country's [ZIP file](http://download.geonames.org/export/dump/) is downloaded from the GeoNames website and unzipped as a plain text file.
-* This text file contains a large amount of geographic information - not all of which is relevant for this particular server.  Therefore, the text file is scanned only for those records having a feature class of "P" (population centres) and "A" (administrative areas).
     * A further restriction is imposed here that feature class "P" records must refer to towns or cities having a population greater than some arbitrary limit (currently set to 500).
-* An internal file is created (`FCP.txt`) that contains the records from each feature class "p" record supplemented with the region information from the relevant feature class "A" records.
-* The eTag for each downloaded country ZIP file is also stored.
-    * If the country server is restarted more than 24 hours after the eTag data was downloaded, then the local country data is considered potentially stale.  The eTag value is now used to check if a new version of the country file exists.  If it does, the new ZIP file is downloaded and a new `FCP.txt` file is created.
-    * Each time a country server is started, the existence of the `FCP.txt` file is checked.  If it exists and is not stale, then the country server will start using the information in `FCP.txt` rather than downloading the country's ZIP file again.  This greatly reduces the country server's start up time.
-* If you start a country server and find that it immediately stops with a substatus of `no_cities`, this is simply because no cities exist in that country with a population greater than the population limit (currently set to 500)
+
+    * An internal file is created (`FCP.txt`) that contains the records from each feature class "p" record supplemented with the region information from the relevant feature class "A" records.  This data then becomes the searchable list of towns/cities for that particular country.
+
+    * Each time a country server is started, the existence of the `FCP.txt` file is checked.  If it exists and is not stale, then the country server will start using the information in `FCP.txt` rather than downloading the country's ZIP file again.  Starting a country server from its `FCP.txt` file greatly reduces the start up time from a few minutes down to a few seconds.
+
+1. The eTag for each downloaded country ZIP file is also stored.
+
+    * If the country server is restarted more than 24 hours after the eTag data was downloaded, then the local country data is considered potentially stale.  The eTag value is now used to check if a new version of the country file exists.  If it does, the new ZIP file is downloaded and a new `FCP.txt` file created.
+
+
+1. If you start a country server and find that it immediately stops with a substatus of `no_cities`, then this is simply means the country contains no towns or cities with a population greater than the population limit (currently set to 500)
 
 
 
 ##  API
 
-A client must send an HTTP `GET` request to the `geo-server` hostname with the path `search`:
+In order to perform a serach, a client must send an HTTP `GET` request to the `geo-server` hostname with the path `/search`:
 
 `geo-server.cfapps.<server>.hana.ondemand.com/search`
 
@@ -109,7 +107,7 @@ The client will receive a JSON array containing zero or more instances of a city
 
 ###  City Object
 
-Each city object returned by the server contains the following properties:
+Each city object contains the following properties:
 
 | Property | Description |
 |---|---|
@@ -123,12 +121,4 @@ Each city object returned by the server contains the following properties:
 | `admin3Txt` | The name of the 3rd level administrative region to which this town/city belongs |
 | `admin4Txt` | The name of the 4th level administrative region to which this town/city belongs |
 | `timeZone` | The name of the timezone in which this town/city is located |
-
-## Server Performance
-
-For each country listed in the [GeoNames countryInfo.txt](http://download.geonames.org/export/dump/countryInfo.txt) file a corresponding country server can be started.
-
-Each country server then reads its `FCP.txt` file.  This file contains a list of all the cities in that country.  This list is then divided up amongst one or more city servers according to the first character of the town/city's name.  So there will be a city server for all cities in that country starting with `a`, one for `b`, and one for `c` etc.
-
-Therefore, setting the `starts_with` query string parameter to `true` will return a result set much faster because each country server knows it need only send the query to the city server dedicated to handling towns/cities starting with the first letter of the `search_term`.
 

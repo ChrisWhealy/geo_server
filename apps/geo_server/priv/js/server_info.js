@@ -48,10 +48,8 @@ const stopAllServers  = () => sendCountryManagerCmd("shutdown_all")
 // ---------------------------------------------------------------------------------------------------------------------
 // Toggle country manager debug status
 // ---------------------------------------------------------------------------------------------------------------------
-const toggleCountryManagerDebug = state => sendCountryManagerCmd("set_debug", state)
-const toggleNetworkTrace        = state => sendCountryManagerCmd("network_trace", state)
-
-const toggleCountryServerDebug = (cc, state) => sendCountryServerCmd(cc, (state ? "trace_on" : "trace_off"))
+const toggleCountryManagerDebug = state       => sendCountryManagerCmd("set_debug", state)
+const toggleCountryServerDebug  = (cc, state) => sendCountryServerCmd(cc, (state ? "trace_on" : "trace_off"))
 
 const sendCountryManagerCmd = (cmd, param) => {
   var xhr = new XMLHttpRequest()
@@ -82,6 +80,7 @@ const sendCountryManagerCmd = (cmd, param) => {
 // ---------------------------------------------------------------------------------------------------------------------
 const startServer = cc => sendCountryServerCmd(cc,"start")
 const stopServer  = cc => sendCountryServerCmd(cc,"shutdown")
+const resetServer = cc => sendCountryServerCmd(cc,"reset")
 
 const sendCountryServerCmd = (cc,cmd) => {
   var xhr = new XMLHttpRequest()
@@ -100,8 +99,9 @@ const sendCountryServerCmd = (cc,cmd) => {
                 cmd_response.reason)
         }
         else {
-          if (cmd_response.cmd === "start" ||
-              cmd_response.cmd === "shutdown") {
+          if (cmd_response.cmd === "start"    ||
+              cmd_response.cmd === "shutdown" ||
+              cmd_response.cmd === "reset") {
             var newRec = cmd_response.reason
             var oldRec = document.getElementById(newRec.name)
 
@@ -127,22 +127,19 @@ const show_status = responseText => {
   var serverObj    = JSON.parse(responseText)
   var serverStatus = document.getElementById("server_status")
 
-  var cmDiv   = build_cm_trace_checkbox(serverObj.country_manager_trace)
-  var netDiv  = build_net_trace_checkbox(serverObj.network_trace)
-  var memDiv  = build_memory_usage(serverObj.erlang_memory_usage)
+  var cbRow   = build_cm_trace_checkbox_row(serverObj.country_manager_trace)
+  var memRow  = build_memory_usage_row(serverObj.erlang_memory_usage)
+  var cityRow = build_city_total_row(serverObj.servers.reduce(city_total, 0))
 
+  var info_table = htmlElement("table", null, [cbRow, memRow, cityRow])
   var cmdBtnsDiv = htmlElement("div", null, build_cmd_buttons())
 
   document.getElementById("server_status").innerHTML =
-    htmlGenElement(cmDiv) +
-    htmlGenElement(netDiv) +
-    htmlGenElement(memDiv) +
+    htmlGenElement(info_table) +
     htmlGenElement(cmdBtnsDiv)
 
-  // Is the server table sorted by ZIP file size or by country name within continent?
-  serverTable = (serverObj.servers[0].country_code === undefined)
-    ? build_table_by_continent(serverObj.servers)
-    : build_table_by_size(serverObj.servers)
+  // At the moment, the server table is only sorted by ZIP file size
+  serverTable = build_table_by_size(serverObj.servers)
 
   document.getElementById("country_servers").innerHTML = htmlGenElement(serverTable)
 }
@@ -152,7 +149,7 @@ const show_error = statusText => alert(statusText)
 // ---------------------------------------------------------------------------------------------------------------------
 // Create HTML elements for the server report
 // ---------------------------------------------------------------------------------------------------------------------
-const build_cm_trace_checkbox = state => {
+const build_cm_trace_checkbox_row = state => {
   var id = "country_manager_trace"
 
   var cbParams = [
@@ -167,25 +164,10 @@ const build_cm_trace_checkbox = state => {
   var traceCB    = htmlElement('input', cbParams)
   var traceLabel = htmlElement('label', htmlParam("htmlFor", id), "Country manager debug trace")
 
-  return htmlElement("div",null,[traceLabel, traceCB])
-}
+  var traceCheckBoxTD = htmlElement("td", TD_ALIGN("left"),  traceCB)
+  var traceLabelTD    = htmlElement("td", TD_ALIGN("right"), traceLabel)
 
-const build_net_trace_checkbox = state => {
-  var id = "network_trace"
-
-  var cbParams = [
-      htmlParam("name", id)
-    , htmlParam("id",   id) 
-    , htmlParam("type", "checkbox") 
-    , htmlParam("onclick", "toggleNetworkTrace(this.checked)") 
-  ]
-
-  if (state === "true") cbParams.push(htmlParam("checked"))
-
-  var traceCB    = htmlElement('input', cbParams)
-  var traceLabel = htmlElement('label', htmlParam("htmlFor", id), "Network level trace")
-
-  return htmlElement("div",null,[traceLabel, traceCB])
+  return htmlElement("tr", null, [traceLabelTD, traceCheckBoxTD])
 }
 
 const build_trace_checkbox = (cc, state) => {
@@ -203,11 +185,21 @@ const build_trace_checkbox = (cc, state) => {
   return htmlElement('input', cbParams)
 }
 
-const build_memory_usage = mem => htmlElement('p', null, "Erlang runtime memory usage = " + mem)
+const build_memory_usage_row = mem =>
+  htmlElement("tr",
+              null,
+              [htmlElement("td", TD_ALIGN("right"), "Erlang runtime memory usage"),
+               htmlElement("td", TD_ALIGN("left"), mem)])
+
+const build_city_total_row = cities =>
+  htmlElement("tr",
+              null,
+              [htmlElement("td", TD_ALIGN("right"), "Total number of cities"),
+               htmlElement("td", TD_ALIGN("left"), cities)])
 
 const build_cmd_buttons = () => {
   var startBtn = htmlElement('button',
-                             [htmlParam("onclick","alert('Not implemented yet')")],
+                             [htmlParam("onclick","startAllServers()")],
                              "Start all servers")
   var stopBtn  = htmlElement('button',
                              [htmlParam('onclick','stopAllServers()')],
@@ -219,6 +211,8 @@ const build_cmd_buttons = () => {
 // ---------------------------------------------------------------------------------------------------------------------
 // Create HTML elements for server status table
 // ---------------------------------------------------------------------------------------------------------------------
+const city_total = (acc, country) => acc += country.city_count
+
 const build_table_by_continent = servers => { }
 
 const build_table_by_size = servers => {
@@ -235,7 +229,7 @@ const build_table_row = country => {
 }
 
 const build_table_columns = country => 
-  [ htmlElement("td", [TD_ALIGN("center")], build_action_button(country.substatus, country.country_code))
+  [ htmlElement("td", [TD_ALIGN("center")], build_action_button(country))
   , htmlElement("td", [TD_ALIGN("center")], build_trace_checkbox(country.country_code, country.trace))
   , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.country_code)
   , htmlElement("td", [status_colour(country.status, country.substatus)], country.country_name)
@@ -251,17 +245,22 @@ const build_table_columns = country =>
   ]
 
 // ---------------------------------------------------------------------------------------------------------------------
-const build_action_button = (substatus, cc) => {
+const build_action_button = (country) => {
   var btn = htmlElement('button', [])
 
-  if (substatus === "running") {
-    btn.content = "Stop"
-    btn.params.push(htmlParam('onclick','stopServer(\'' + cc + '\')'))
+  if (country.status === "crashed") {
+    btn.content = "Reset"
+    btn.params.push(htmlParam('onclick','resetServer(\'' + country.country_code + '\')'))
   }
-  else {
-    btn.content = "Start"
-    btn.params.push(htmlParam('onclick','startServer(\'' + cc + '\')'))
-  }
+  else
+    if (country.substatus === "running") {
+      btn.content = "Stop"
+      btn.params.push(htmlParam('onclick','stopServer(\'' + country.country_code + '\')'))
+    }
+    else {
+      btn.content = "Start"
+      btn.params.push(htmlParam('onclick','startServer(\'' + country.country_code + '\')'))
+    }
 
   return btn
 }

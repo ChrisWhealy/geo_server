@@ -8,8 +8,10 @@
 -export([
     import_country_info/1
   , http_get_request/4
-  , http_head_request/4
-  , write_file/2, write_file/4
+  , http_head_request/3
+  , write_file/2
+  , write_file/4
+  , move_file/4
   , handle_zip_file/4
   , check_for_update/1
 ]).
@@ -25,12 +27,15 @@
 -define(RETRY_LIMIT, 3).
 
 
-%% -----------------------------------------------------------------------------
-%%                             P U B L I C   A P I
-%% -----------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                 P U B L I C   A P I
+%%
+%% =====================================================================================================================
 
-%% -----------------------------------------------------------------------------
-%% Import the country info file and send list of countries back to the application
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Import the country info file and send list of countries back to the top level application
 import_country_info(ApplicationPid) -> 
   %% Debug trace output
   put(trace, true),
@@ -48,11 +53,11 @@ import_country_info(ApplicationPid) ->
   end.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% HTTP HEAD request
 %%
-%% Used to discover country ZIP file size
-http_head_request(CallerPid, Filename, Ext, Trace) ->
+%% Used to discover a country's ZIP file size
+http_head_request(Filename, Ext, Trace) ->
   case Trace of
     true -> put(trace, true);
     _    -> put(trace, false)
@@ -60,8 +65,8 @@ http_head_request(CallerPid, Filename, Ext, Trace) ->
 
   Url = ?GEONAMES_URL ++ Filename ++ Ext,
 
-  %% Send the HEAD request, and fire the response back to the CallerPid
-  CallerPid ! case ibrowse:send_req(Url, [], head) of
+  %% Send off the HEAD request, and fire the response back to the country_manager
+  country_manager ! case ibrowse:send_req(Url, [], head) of
     {ok, StatusCode, Hdrs, _Body} ->
       % ?TRACE("HTTP ~s for HEAD request to ~s",[StatusCode, Url]),
 
@@ -76,36 +81,36 @@ http_head_request(CallerPid, Filename, Ext, Trace) ->
   end.
     
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Always perform a conditional HTTP GET request
 %%
-%% This function is typically spawned, so for debug purposes, it inherits the
-%% debug trace setting from its parent
+%% This function is typically spawned, so for debug purposes, it inherits the debug trace setting from its parent
 http_get_request(CallerPid, Filename, Ext, Trace) ->
   case Trace of
     true -> put(trace, true);
     _    -> put(trace, false)
   end,
 
-  Url = ?GEONAMES_URL ++ Filename ++ Ext,
+  Url     = ?GEONAMES_URL ++ Filename ++ Ext,
+  Options = [{save_response_to_file, true}],
 
   %% Check to see if we have an ETag for this file
   Response = case read_etag_file(Filename) of
     missing -> 
       ?TRACE("ETag file missing, sending normal GET request for ~s",[Url]),
-      ibrowse:send_req(Url, [], get);
+      ibrowse:send_req(Url, [], get, [], Options);
 
     Etag ->
       ?TRACE("Sending conditional GET request for ~s",[Url]),
-      ibrowse:send_req(Url, [{"If-None-Match", Etag}], get)
+      ibrowse:send_req(Url, [{"If-None-Match", Etag}], get, [], Options)
   end,
     
   CallerPid ! case Response of
-    {ok, "200", Hdrs, Body} ->
+    {ok, "200", Hdrs, {file, TempFilename}} ->
       ?TRACE("HTTP 200 for ~s",[Url]),
-      {ok, Filename, Ext, get_etag(Hdrs), Body};
+      {ok, Filename, Ext, get_etag(Hdrs), TempFilename};
 
-    {ok, "304",_Hdrs,_Body} ->
+    {ok, "304", _Hdrs, _Body} ->
       ?TRACE("HTTP 304 for ~s",[Url]),
       {not_modified, Filename, Ext};
       
@@ -119,7 +124,7 @@ http_get_request(CallerPid, Filename, Ext, Trace) ->
   end.
     
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Check if the file needs to be updated. Files are considered stale after 24 hrs
 check_for_update(CountryCode) ->
   case is_stale(?COUNTRY_FILE_FULL(CountryCode)) of
@@ -133,16 +138,11 @@ check_for_update(CountryCode) ->
   end.
 
 
-%% -----------------------------------------------------------------------------  
-%% Unzip only the data file from a zipped country file, then throw away the ZIP
-%% file.
-handle_zip_file(Dir, File, Ext, Body) ->
-  ZipFileName = Dir ++ File ++ Ext,
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Unzip only the data file from a zipped country file, then throw away the ZIP file.
+handle_zip_file(Dir, File, _Ext, ZipFileName) ->
   TxtFileName = Dir ++ File ++ ".txt",
 
-  ?TRACE("Writing ZIP file ~s",[ZipFileName]),
-  write_file(Dir, File, Ext, Body),
-  
   ?TRACE("Unzipping ~s to create ~s",[ZipFileName, TxtFileName]),
   case zip:unzip(ZipFileName, [{file_list, [File ++ ".txt"]}, {cwd, Dir}]) of
     {ok, [TxtFileName]} -> ok;
@@ -153,7 +153,7 @@ handle_zip_file(Dir, File, Ext, Body) ->
   file:delete(ZipFileName).
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Write file to disc
 write_file(FQFilename, Content) ->
   case file:write_file(FQFilename, Content) of
@@ -168,11 +168,14 @@ write_file(Dir, Filename, Ext, Content) ->
   end.
 
 
-%% -----------------------------------------------------------------------------
-%%                            P R I V A T E   A P I
-%% -----------------------------------------------------------------------------
 
-%% -----------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                               P R I V A T E   A P I
+%%
+%% =====================================================================================================================
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Retry download of files that previously failed
 retry([], _, _) -> done;
 
@@ -185,12 +188,15 @@ retry(RetryList, Ext, RetryCount) ->
 
   receive
   after ?RETRY_WAIT ->
-    lists:foreach(fun({F,Ext1}) -> spawn(?MODULE, http_get_request, [Parent, F, Ext1, get(trace)]) end, RetryList),
+    lists:foreach(fun({F,Ext1}) ->
+        spawn(?MODULE, http_get_request, [Parent, F, Ext1, get(trace)])
+      end,
+      RetryList),
     retry(wait_for_resources(length(RetryList), Ext), Ext, RetryCount + 1)
   end.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Determine whether or not a local file has gone stale
 is_stale(Filename) ->
   case file_age(Filename) of
@@ -198,9 +204,9 @@ is_stale(Filename) ->
     _                       -> false
   end.
 
-%% -----------------------------------------------------------------------------
-%% Determine age of file in seconds.  If the file does not exist, then assume
-%% its modification date is midnight on Jan 1st, 1970
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Determine age of file in seconds.
+%% If the file does not exist, then assume its modification date is midnight on Jan 1st, 1970
 file_age(Filename) ->
   {Date,{H,M,S}} = case filelib:last_modified(Filename) of
     0 -> {{1970,1,1}, {0,0,0}};
@@ -211,16 +217,16 @@ file_age(Filename) ->
   %% Convert standard DateTime to custom DateTime format by adding microseconds
   time_diff(?NOW, {Date,{H,M,S,0}}).
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Wait for 'Count' HTTP resource to be returned
-wait_for_resources(Count, text) -> wait_for_resources(Count, write_file, []);
+wait_for_resources(Count, text) -> wait_for_resources(Count, move_file, []);
 wait_for_resources(Count, zip)  -> wait_for_resources(Count, handle_zip_file, []).
 
 wait_for_resources(0,    _Fun, RetryList) -> RetryList;
 wait_for_resources(Count, Fun, RetryList) ->
   RetryList1 = receive
     %% New version of the file has been receievd
-    {ok, Filename, Ext, Etag, Body} ->
+    {ok, Filename, Ext, Etag, TempFilename} ->
       %% Each country file or the hierarchy file is written to its own directory
       TargetDir = ?TARGET_DIR ++ Filename ++ "/",
       filelib:ensure_dir(TargetDir),
@@ -234,7 +240,7 @@ wait_for_resources(Count, Fun, RetryList) ->
       end,
 
       %% Call handler for this file type    
-      ?MODULE:Fun(TargetDir, Filename, Ext, Body),
+      ?MODULE:Fun(TargetDir, Filename, Ext, TempFilename),
       RetryList;
     
     %% This file is unchanged since the last refresh
@@ -265,7 +271,7 @@ wait_for_resources(Count, Fun, RetryList) ->
   wait_for_resources(Count-1, Fun, RetryList1).
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Read the countryInfo.txt file and fetch each individual country file
 parse_countries_file(Filename, Ext) ->
   parse_countries_file(file:open(?TARGET_DIR ++ Filename ++ "/" ++ Filename ++ Ext, [read])).
@@ -275,7 +281,7 @@ parse_countries_file({ok, IoDevice})  -> {ok, read_countries_file(IoDevice, [])}
 parse_countries_file({error, Reason}) -> {error, Reason}.
 
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Read the countries file and create a list of country codes skipping any lines
 %% that import_country_info with a hash character
 read_countries_file(IoDevice, []) ->
@@ -296,29 +302,42 @@ get_country_info($#,_Tokens, Acc) -> Acc;
 get_country_info(_,  Tokens, Acc) ->
   lists:append(Acc, [{lists:nth(1,Tokens), lists:nth(5,Tokens), lists:nth(9,Tokens)}]).
 
-%% -----------------------------------------------------------------------------
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Read local eTag file
 read_etag_file({ok, IoDevice}) -> read_etag_file(IoDevice, io:get_line(IoDevice,""), "");
 read_etag_file({error, _})     -> missing;
-read_etag_file(Filename)       ->
-  ?TRACE("Trying to open Etag file for ~s",[?COUNTRY_FILE_ETAG(Filename)]),
-  read_etag_file(file:open(lists:append([?COUNTRY_FILE_ETAG(Filename)]), [read])).
+read_etag_file(Filename)       -> read_etag_file(file:open(lists:append([?COUNTRY_FILE_ETAG(Filename)]), [read])).
 
 read_etag_file(IoDevice, eof, "")   -> file:close(IoDevice), missing;
 read_etag_file(IoDevice, eof, Etag) -> file:close(IoDevice), Etag;
 read_etag_file(IoDevice, Etag, "")  -> file:close(IoDevice), Etag.
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Extract eTag from HTTP headers
 get_etag([])                    -> missing;
 get_etag([{"ETag", Etag} | _])  -> Etag;
 get_etag([{"etag", Etag} | _])  -> Etag;
 get_etag([{_Hdr, _Val} | Rest]) -> get_etag(Rest).
 
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Extract content-length from HTTP headers
 get_content_length([])                                      -> missing;
 get_content_length([{"Content-Length", ContentLength} | _]) -> list_to_integer(ContentLength);
 get_content_length([{"content-length", ContentLength} | _]) -> list_to_integer(ContentLength);
 get_content_length([{_Hdr, _Val} | Rest])                   -> get_content_length(Rest).
 
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Move file
+move_file(Dir, Filename, Ext, From) ->
+  To = Dir ++ Filename ++ Ext,
+
+  case file:copy(From, To) of
+    {ok, _BytesCopied} ->
+      file:delete(From),
+      ok;
+
+    {error, Reason} ->
+      io:format("Copying file from ~s to ~s failed: ~p~n",[From, To, Reason])
+  end.

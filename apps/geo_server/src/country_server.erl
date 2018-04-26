@@ -6,8 +6,8 @@
 -created_by("chris.whealy@sap.com").
 
 -export([
-    init/3
-  , start/4
+    init/2
+  , start/3
 ]).
 
 -include("../include/trace.hrl").
@@ -24,16 +24,16 @@
 %% Initialise the country server
 %% We could be passed either the two character country code as a string, or the name of server as an atom depending on
 %% where the start command came from
-init(CC, Trace, NetTrace) when is_list(CC) ->
-  do_init(list_to_atom("country_server_" ++ string:lowercase(CC)), Trace, NetTrace);
+init(CC, Trace) when is_list(CC) ->
+  do_init(list_to_atom("country_server_" ++ string:lowercase(CC)), Trace);
 
-init(CC, Trace, NetTrace) when is_atom(CC) ->
-  do_init(CC, Trace, NetTrace).
+init(CC, Trace) when is_atom(CC) ->
+  do_init(CC, Trace).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Start the country server
-start(CC, ServerName, Trace, NetTrace) ->
+start(CC, ServerName, Trace) ->
   process_flag(trap_exit, true),
   
   %% Store various values in the process dictionary
@@ -42,15 +42,9 @@ start(CC, ServerName, Trace, NetTrace) ->
   put(cc, CC),
   put(city_count, unknown),
 
-  %% Trace flag supplied by the country manager
+  %% Trace and NetworkTrace flags supplied by the country manager
   put(trace, Trace),
 
-  %% Set network trace on/off
-  case NetTrace of
-    true  -> ibrowse:trace_on();
-    _     -> ibrowse:trace_off()
-  end,
-  
   %% Inform country manager that this server is starting up
   country_manager ! {starting, init, ServerName, ?NOW},
 
@@ -84,12 +78,12 @@ start(CC, ServerName, Trace, NetTrace) ->
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Internal startup function
-do_init(ServerName, Trace, NetTrace) ->
+do_init(ServerName, Trace) ->
   %% Has this country server already been registered?
   case whereis(ServerName) of
     undefined ->
       CC = extract_cc(ServerName),
-      CountryServerPid = spawn_link(?MODULE, start, [CC, ServerName, Trace, NetTrace]),
+      CountryServerPid = spawn_link(?MODULE, start, [CC, ServerName, Trace]),
       register(ServerName, CountryServerPid),
       CountryServerPid;
 
@@ -101,8 +95,6 @@ do_init(ServerName, Trace, NetTrace) ->
 %% If the CityServerList is empty, then either this country has no cities with populations large enough to appear in a
 %% search, or all the city servers have shut down.  Either way, the country server should also shut down
 wait_for_msg([]) ->
-  put(trace, true),
-
   Reason = case get(shutdown) of
     undefined -> no_cities;
     _         -> stopped
@@ -162,8 +154,8 @@ wait_for_msg(CityServerList) ->
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Query
-    {query, Ref, {search_term, Query, whole_word, _, starts_with, _} = QS, RequestHandlerPid} ->
-      ?TRACE("Country server ~s (~p) received query \"~s\" from request handler ~p", [get(cc), self(), Query, RequestHandlerPid]),
+    {query, Ref, {search_term, SearchTerm, whole_word, _, starts_with, _} = QS, RequestHandlerPid} ->
+      ?TRACE("Country server ~s (~p) received query \"~s\" from request handler ~p", [get(cc), self(), SearchTerm, RequestHandlerPid]),
       RequestHandlerPid ! handle_query(Ref, CityServerList, QS),
       CityServerList
 
@@ -204,15 +196,15 @@ wait_for_results(Ref, N, ResultList) ->
 
 %% If the starts_with parameter is false, then the "contains" search option has been selected.  Therefore, the query
 %% must be sent to all city servers for this country
-handle_query(Ref, CityServerList, {search_term, Query, whole_word, _, starts_with, false} = QS) ->
+handle_query(Ref, CityServerList, {search_term, SearchTerm, whole_word, _, starts_with, false} = QS) ->
   ?TRACE("Sending query to all city servers"),
-  send_to_all(CityServerList, {Ref, QS, get(cc), Query, self()}),
+  send_to_all(CityServerList, {Ref, QS, get(cc), SearchTerm, self()}),
   wait_for_results(Ref, length(CityServerList), []);
 
 
 %% If the starts_with parameter is true, then query need only be sent to the city server handling cities starting with
 %% the first letter of the search term
-handle_query(Ref, CityServerList, {search_term, [Char1 | _] = Query, whole_word, _, starts_with, true} = QS) ->
+handle_query(Ref, CityServerList, {search_term, [Char1 | _] = SearchTerm, whole_word, _, starts_with, true} = QS) ->
   Id = string:uppercase([Char1]),
 
   %% Do we have a child process for the first letter of this query?
@@ -220,7 +212,7 @@ handle_query(Ref, CityServerList, {search_term, [Char1 | _] = Query, whole_word,
     %% Yup, so pass query down to the relevant child process
     {pid, ChildPid, id, Id} ->
       ?TRACE("Sending query to ~s city server ~p",[get(cc), Id]),
-      ChildPid ! {Ref, QS, get(cc), Query, self()},
+      ChildPid ! {Ref, QS, get(cc), SearchTerm, self()},
       wait_for_results(Ref, 1, []);
 
     %% Nope, so ignore query
@@ -289,9 +281,9 @@ distribute_cities([FCP_Rec | Rest], CityServerList) ->
   NewCityServer = case lists:keyfind([Char1], 4, CityServerList) of
     %% No child process exists yet for city names starting with this letter
     false ->
-      country_manager ! {starting, distribute_cities, get(my_name), new_child, Char1},
-      [{pid, spawn_link(city_server, init, [self(), Char1, [FCP_Rec]]),
-         id, [Char1]}];
+      % ?TRACE("~p starting new city server for letter ~c",[get(my_name), Char1]),
+      country_manager ! {starting, distribute_cities, get(my_name), Char1},
+      [{pid, spawn_link(city_server, init, [self(), Char1, [FCP_Rec]]), id, [Char1]}];
 
     %% A child process already exists to handle cities starting with this letter, so send the curemnt record to that
     %% process.  We do not expect a reply
@@ -307,10 +299,15 @@ distribute_cities([FCP_Rec | Rest], CityServerList) ->
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Send either a command or a query to all city servers
 send_to_all(CityServerList, CmdOrQuery) ->
+  Msg = case is_atom(CmdOrQuery) of
+    true  -> {cmd, CmdOrQuery};
+    false -> CmdOrQuery 
+  end,
+
   lists:foreach(
     fun({pid, Pid, id, _Id}) ->
       ?TRACE("Sending ~p to ~p city server ~p",[CmdOrQuery, get(cc), _Id]),
-      Pid ! {cmd, CmdOrQuery}
+      Pid ! Msg
     end,
     CityServerList
   ).

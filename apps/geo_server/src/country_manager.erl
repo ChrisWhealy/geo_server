@@ -16,6 +16,9 @@
 -include("../include/utils.hrl").
 
 -define(COUNTRY_SERVER_NAME(CountryCode), list_to_atom("country_server_" ++ string:lowercase(CountryCode))).
+-define(RETRY_LIMIT, 3).
+-define(RETRY_WAIT,  5000).
+
 
 %% =====================================================================================================================
 %%
@@ -39,36 +42,14 @@ end,
 %%
 %% This process is responsible for starting and then managing each of the individual country servers
 start(CountryList) ->
-  Me = self(),
   process_flag(trap_exit, true),
 
-  % Debug and network level trace flags
+  % Debug trace flag starts in the off position.  Can be switched on from the admin screen
   put(trace, false),
-  put(network_trace, false),
 
   ?TRACE("Starting country manager (~p) with ~w country servers at ~s",[self(), length(CountryList), format_datetime(?NOW)]),
-
-  CountryServerList = [
-    %% Build the country server list with all servers in the initial status of stopped
-    %% Also fire off a HEAD request for each country ZIP file in order to discover its size
-    (fun(ReturnPid, CC, CName, Cont, Trace) ->
-       spawn(import_files, http_head_request,[ReturnPid, CC, ".zip", Trace]),
-
-       #country_server{
-         name         = ?COUNTRY_SERVER_NAME(CC)
-       , country_name = CName
-       , continent    = Cont
-       , country_code = CC
-       , status       = stopped
-       , trace        = false
-       }
-     end)
-    (Me, CountryCode, CountryName, Continent, get(trace))
-    ||
-    {CountryCode, CountryName, Continent} <- CountryList
-  ],
-
-  CountryServerList1 = wait_for_head_responses(CountryServerList),
+  CountryServerList  = initialise_country_server_list(CountryList),
+  CountryServerList1 = wait_for_head_responses(fetch_zip_file_sizes(CountryServerList)),
 
   wait_for_msgs(lists:sort(fun(A,B) -> sort_country_server(A,B) end, CountryServerList1)).
 
@@ -129,7 +110,13 @@ wait_for_msgs(CountryServerList) ->
         _ ->
           DeadServerName = get_server_name_from_pid(CountryServerPid, CountryServerList),
           io:format("Country server ~p (~p) terminated for reason '~p'~n", [DeadServerName, CountryServerPid, Reason]),
-          set_server_status(CountryServerList, CountryServerPid, crashed, see_logs, 0, [], 0)
+
+          Reason1 = case Reason of
+            {retry_limit_exceeded, _} -> retry_limit_exceeded;
+            _                         -> see_logs
+          end,
+
+          set_server_status(CountryServerList, CountryServerPid, crashed, Reason1, 0, [], 0)
       end;
 
 
@@ -137,28 +124,29 @@ wait_for_msgs(CountryServerList) ->
     %% Messages from country servers reporting the how their startup sequence is progressing
     %%
     %% Initialisation
+    {starting, country_file_download, CountryCode} ->
+      set_server_status(CountryServerList, ?COUNTRY_SERVER_NAME(CountryCode), starting, country_file_download, 0, [], undefined);
+    
+    {starting, Substatus, CountryServer} ->
+      set_server_status(CountryServerList, CountryServer, starting, Substatus, complete, [], undefined);
+
     {starting, init, CountryServer, StartTime} ->
       set_server_status(CountryServerList, CountryServer, starting, init, init, [], StartTime);
 
-    %% File import (either full text file or internal FCP files)
+    {starting, Substatus, CountryServer, Id} ->
+      set_server_status(CountryServerList, CountryServer, starting, Substatus, complete, Id, undefined);
+  
     {starting, Substatus, CountryServer, progress, Progress} ->
       set_server_status(CountryServerList, CountryServer, starting, Substatus, Progress, [], undefined);
 
-    %% Distribution of cities across city servers
-    {starting, Substatus, CountryServer, new_child, Id} ->
-      set_server_status(CountryServerList, CountryServer, starting, Substatus, complete, Id, undefined);
 
-    {starting, country_file_download, CountryCode} ->
-      set_server_status(CountryServerList, ?COUNTRY_SERVER_NAME(CountryCode), starting, country_file_download, 0, [], undefined);
-  
-    {starting, Substatus, CountryServer} ->
-      set_server_status(CountryServerList, CountryServer, starting, Substatus, complete, [], undefined);
-  
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% Start up complete, server now running
+    %%
     {started, running, CountryServer, CityCount, StartupComplete} ->
       ?TRACE("Country server ~p is up and running",[CountryServer]),
       set_server_running(CountryServerList, CountryServer, CityCount, StartupComplete);
-    
+
 
     %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% STATUS commands
@@ -166,13 +154,14 @@ wait_for_msgs(CountryServerList) ->
     %% Status commmands from some request handler
     {cmd, status, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       ?TRACE("Server status requested from request handler ~p",[RequestHandlerPid]),
-      RequestHandlerPid ! {country_server_list, CountryServerList, trace_on, get(trace), network_trace, get(network_trace)},
+      RequestHandlerPid ! {country_server_list, CountryServerList, trace_on, get(trace)},
       CountryServerList;
 
     {cmd, status, started, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       ?TRACE("List of started servers requested by ~p",[RequestHandlerPid]),
       RequestHandlerPid ! {started_servers, started_servers(CountryServerList)},
       CountryServerList;
+
 
     %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% SHUTDOWN messages
@@ -222,6 +211,7 @@ wait_for_msgs(CountryServerList) ->
           lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1)
       end;
 
+
     %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% START messages
     %%
@@ -229,40 +219,64 @@ wait_for_msgs(CountryServerList) ->
     {cmd, start, CountryCode, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       CountryServer = ?COUNTRY_SERVER_NAME(CountryCode),
 
-      ?TRACE("Starting country server ~s",[CountryServer]),
-
-      case whereis(CountryServer) of
+      {CountryServerList1, ResponseRec} = case whereis(CountryServer) of
         undefined ->
-          T  = lists:keyfind(CountryServer, #country_server.name, CountryServerList),
-          T1 = T#country_server{pid = country_server:init(CountryServer, T#country_server.trace, get(network_trace)), status = starting},
+          T = lists:keyfind(CountryServer, #country_server.name, CountryServerList),
 
-          RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, reason = T1},
-
-          lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1);
+          %% Did the server lookup work?
+          case T of
+            false ->
+              io:format("Error: Lookup of ~p in CountryServerList failed~n",[CountryServer]),
+              {CountryServerList,
+               #cmd_response{from_server = country_manager, cmd = start, status = error, reason = country_server_not_found}};
+            _ ->
+              T1 = start_country_server(T),
+              {lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1),
+               #cmd_response{from_server = country_manager, cmd = start, status = ok, reason = T1}}
+          end;
 
         _Pid ->
-          io:format("~p already started~n",[CountryServer]),
+          {CountryServerList,
+           #cmd_response{from_server = country_manager, cmd = start, status = error, reason = already_started}}
+      end,
+
+      RequestHandlerPid ! ResponseRec,
+      CountryServerList1;
+
+    %% Start all the country servers at once - hopefully, this worn't explode when running in cloud foundry
+    {cmd, start_all, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+      ?TRACE("Starting all country servers"),
+      CountryServerList1 = start_all_country_servers(CountryServerList),
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = start_all, status = ok},
+      CountryServerList1;
+
+
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+    %% Reset a crashed country server
+    %%
+    {cmd, reset, CC, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+      CountryServerName = ?COUNTRY_SERVER_NAME(CC),
+      S = lists:keyfind(CountryServerName, #country_server.name, CountryServerList),
+
+      case S#country_server.status of
+        crashed ->
+          ?TRACE("Reseting crashed server ~p",[CountryServerName]),
+          S1 = reset_crashed_server(S),
+          RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = reset, status = ok, reason = S1},
+          lists:keyreplace(CountryServerName, #country_server.name, CountryServerList, S1);
+
+        _ ->
+          RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = reset, status = error, reason = server_not_crashed},
           CountryServerList
       end;
 
-    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-    %% Network level trace on/off command
-    %%
-    {cmd, network_trace, TraceState,  RequestHandlerPid} when is_pid(RequestHandlerPid) ->
-      case TraceState of
-        on  -> put(network_trace, true);
-        off -> put(network_trace, false)
-      end,
-
-      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = network_trace, status = ok},
-      CountryServerList;
-
+  
 
     %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% Debug trace on/off commands
     %%
     %% Turn trace on/off for the country manager
-    {cmd, trace, TraceState,  RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+    {cmd, trace, TraceState, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       case TraceState of
         on  -> put(trace, true);
         off -> put(trace, false)
@@ -301,6 +315,26 @@ wait_for_msgs(CountryServerList) ->
   end,
 
   wait_for_msgs(ServerStatusList1).
+
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Reset a crashed server back to its initial conditions
+reset_crashed_server(Rec) ->
+  %% Ensure that the country server process is dead
+  case whereis(Rec#country_server.name) of
+    undefined -> ok;
+    Pid       -> exit(Pid, reset)
+  end,
+
+  %% Return a new record defining the server's new initial state
+  #country_server{
+    name           = Rec#country_server.name
+  , country_name   = Rec#country_server.country_name
+  , continent      = Rec#country_server.continent
+  , country_code   = Rec#country_server.country_code
+  , status         = stopped
+  , zip_size       = Rec#country_server.zip_size
+  }.
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
@@ -509,29 +543,92 @@ sort_country_server(A,B) ->
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
+%% Convert the initial list of countries into a list of country_server records with status stopped
+initialise_country_server_list(CountryList) ->
+  [ #country_server{
+      name         = ?COUNTRY_SERVER_NAME(CountryCode)
+    , country_name = CountryName
+    , continent    = Continent
+    , country_code = CountryCode
+    , status       = stopped
+    , trace        = false
+    }
+    ||
+    {CountryCode, CountryName, Continent} <- CountryList
+  ].
+
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Determine the ZIP file sizes for all the countries in the server list
+fetch_zip_file_sizes(CountryServerList) ->
+  lists:foreach(
+    fun(Svr) ->
+      spawn(import_files, http_head_request, [Svr#country_server.country_code, ".zip", get(trace)])
+    end,
+    CountryServerList
+  ),
+
+  CountryServerList.
+
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Wait for HTTP HEAD responses
-wait_for_head_responses(CSList) -> wait_for_head_responses(CSList, []).
+wait_for_head_responses(CSList) -> wait_for_head_responses(CSList, [], [], 0).
 
-wait_for_head_responses([], Acc) -> Acc;
+%% All HEAD responses received and the RetryList is empty
+wait_for_head_responses([], Acc, [], _) -> Acc;
 
-wait_for_head_responses(CSList, Acc) ->
+%% Retry limit exceeded
+wait_for_head_responses([], Acc, RetryList, RetryCount) when RetryCount >= ?RETRY_LIMIT ->
+  %% Some HEAD requests just won't work today... This is annoying, but not fatal
+  %% Set the zip file sizes to zero for all the remaining countries
+  Acc ++ [ update_zip_size(Svr, 0) || Svr <- RetryList ];
+
+%% Most of the HEAD responses have been received, but a few failed
+wait_for_head_responses([], Acc, RetryList, RetryCount) ->
+  %% Wait for an arbitrary amount of time before retrying HEAD requests
+  io:format("Retrying HEAD requests for ~w countries~n",[length(RetryList)]),
+
+  receive
+  after ?RETRY_WAIT ->
+    wait_for_head_responses(fetch_zip_file_sizes(RetryList), Acc, [], RetryCount + 1)
+  end;
+
+%% Haven't finished sending off the HEAD requests
+wait_for_head_responses(CSList, Acc, RetryList, RetryCount) ->
   % ?TRACE("Waiting for HEAD response for ~p remaining countries",[length(CSList)]),
+  
+  {CSList1, Acc1, RetryList1} = receive
+    {Tag, Part2, Filename, Ext} ->
+      %% Find the server to which this message belongs in the CountryServerList
+      Svr = lists:keyfind(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList),
 
-  {S, Filename1} = receive
-    {ok, ContentLength, Filename, _Ext} ->
-      % ?TRACE("Got content length ~w for ~s~s",[ContentLength,Filename,_Ext]),
-      {update_zip_size(lists:keyfind(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList), ContentLength), Filename};
+      %% Did the HEAD request succeed?
+      case Tag of
+        % Yup, so in this case Part2 of the message tuple will contain the file's content length
+        ok ->
+          %% Remove the current server from the CSlist, add it to the accumulator, and the RetryList remains unmodified
+          {lists:keydelete(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList),
+           Acc ++ [update_zip_size(Svr, Part2)],
+           RetryList};
 
-    {error, {status_code, StatusCode}, Filename, Ext} ->
-      io:format("Received HTTP status code ~w when requesting content length of ~s~s~n",[StatusCode, Filename, Ext]),
-      {lists:keyfind(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList), Filename};
-      
-    {error, {other, Reason}, Filename, Ext} ->
-      io:format("Unable to determine ZIP file size for ~s~s. Reason: ~p~n",[Filename, Ext, Reason]),
-      {lists:keyfind(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList), Filename}
+        % Nope, so something went wrong with the HEAD request
+        error ->
+          %% Write error message to the console
+          case Part2 of
+            {status_code, StatusCode} -> io:format("Received HTTP status code ~w when requesting content length of ~s~s~n",[StatusCode, Filename, Ext]);
+            {other, Reason}           -> io:format("Unable to determine ZIP file size for ~s~s. Reason: ~p~n",[Filename, Ext, Reason])
+          end,
+
+          %% Remove the current server from the CSlist, the accumulator remains unmodieid, and the failed server is
+          %% added to the RetryList
+          {lists:keydelete(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList),
+           Acc,
+           RetryList ++ [Svr]}
+      end
   end,
 
-  wait_for_head_responses(lists:keydelete(?COUNTRY_SERVER_NAME(Filename1), #country_server.name, CSList), Acc ++ [S]).
+  wait_for_head_responses(CSList1, Acc1, RetryList1, RetryCount).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
@@ -541,11 +638,29 @@ format_country_server_record(R) ->
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
+%% Start all country servers
+start_all_country_servers(CountryServerList) ->
+  [ start_country_server(Svr) || Svr <- CountryServerList ].
+
+%% Start a country server
+start_country_server(Svr) when Svr#country_server.status == stopped ->
+  CountryServer = ?COUNTRY_SERVER_NAME(Svr#country_server.country_code),
+  ?TRACE("Starting country server ~s",[CountryServer]),
+
+  case whereis(CountryServer) of
+    undefined -> Svr#country_server{pid = country_server:init(CountryServer, Svr#country_server.trace), status = starting};
+    _Pid      -> Svr
+  end;
+
+%% Ignore any country server that has a status other than 'stopped'
+start_country_server(Svr) -> Svr.
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Stop all country servers
 stop_all_country_servers(CountryServerList) ->
   [ stop_country_server(Svr) || Svr <- CountryServerList ].
 
-%% Stop a started country server
+%% Stop a country server
 stop_country_server(Svr) when Svr#country_server.status == started ->
   ?TRACE("Stopping ~p",[Svr#country_server.name]),
   Svr#country_server.name ! {cmd, shutdown},
@@ -561,7 +676,7 @@ stop_country_server(Svr) when Svr#country_server.status == started ->
   , mem_usage      = undefined
   };
 
-%% Ignore country servers that have a status other than 'started'
+%% Ignore any country server that has a status other than 'started'
 stop_country_server(Svr) -> Svr.
 
 

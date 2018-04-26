@@ -8,21 +8,20 @@
 
 -export([init/2]).
 
--include("../include/trace.hrl").
 -include("../include/default_http_response.hrl").
 -include("../include/utils.hrl").
 
 -define(HTTP_GET, <<"GET">>).
 
 
-%% -----------------------------------------------------------------------------
-%%                             P U B L I C   A P I
-%% -----------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                 P U B L I C   A P I
+%%
+%% =====================================================================================================================
 
 init(Req=#{method := ?HTTP_GET}, State) ->
-  put(trace, false),
 	#{cmd := Cmd} = cowboy_req:match_qs([cmd], Req),
-  ?TRACE("Got command ~p from client",[Cmd]),
 
   %% Send the command to the country manager
   case Cmd of
@@ -35,16 +34,8 @@ init(Req=#{method := ?HTTP_GET}, State) ->
         <<"false">> -> country_manager ! {cmd, trace, off, self()}
       end;
 
-    <<"network_trace">> ->
-      #{param := Param} = cowboy_req:match_qs([param], Req),
-
-      case Param of
-        <<"true">>  -> country_manager ! {cmd, network_trace, on,  self()};
-        <<"false">> -> country_manager ! {cmd, network_trace, off, self()}
-      end;
-
-    <<"shutdown_all">> ->
-      country_manager ! {cmd, shutdown_all, self()}
+    <<"start_all">>    -> country_manager ! {cmd, start_all,    self()};
+    <<"shutdown_all">> -> country_manager ! {cmd, shutdown_all, self()}
   end,
 
   %% Wait for command response
@@ -53,7 +44,8 @@ init(Req=#{method := ?HTTP_GET}, State) ->
       record_to_json(cmd_response, CmdResponse);
 
     SomeVal ->
-      record_to_json(cmd_response, #cmd_response{from_server = country_manager, cmd = Cmd, status = error, reason = SomeVal})
+      CmdResp = #cmd_response{from_server = country_manager, cmd = Cmd, status = error, reason = SomeVal},
+      record_to_json(cmd_response, CmdResp)
   end,
 
   {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, JsonResp, Req), State};
@@ -63,8 +55,10 @@ init(Req, State) ->
   {ok, ?METHOD_NOT_ALLOWED_RESPONSE(Req), State}.
 
 
-%% -----------------------------------------------------------------------------
-%%                           P R I V A T E   A P I
-%% -----------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                P R I V A T E   A P I
+%%
+%% =====================================================================================================================
 
 
