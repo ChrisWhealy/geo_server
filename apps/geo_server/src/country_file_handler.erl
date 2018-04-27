@@ -6,8 +6,7 @@
 -created_by("chris.whealy@sap.com").
 
 -export([
-    country_file/1
-  , read_internal_country_file/4
+    country_file/2
   ]).
 
 -include("../include/trace.hrl").
@@ -17,82 +16,74 @@
 
 -define(PROGRESS_FRACTION, 0.01).
 
-%% Feature class P records (Population centres) having a pop[ulation below this limit will not be included in a
+%% Feature class P records (Population centres) having a population below this limit will not be included in a
 %% country's FCP file
 -define(MIN_POPULATION, 500).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Import the internal FCP file if it exists, else import the full country text file.
-country_file(CC) -> country_file(CC, filelib:file_size(?COUNTRY_FILE_FCP(CC))).
+country_file(CC, CountryServerPid) when is_pid(CountryServerPid) ->
+  {registered_name, CountryServerName} = erlang:process_info(CountryServerPid, registered_name),
+
+  put(my_name, CountryServerName),
+  put(trace, read_process_dictionary(CountryServerPid, trace)),
+
+  country_file_int(CC, filelib:file_size(?COUNTRY_FILE_FCP(CC)), CountryServerPid).
 
 
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Import country file.
-%% A non-zero size of the internal FCP country file is used to switch between importing the internal files, or importing
-%% the full country file
-country_file(CC, 0) ->
-  ?TRACE("Internal FCP file does not exist"),
+%% Read full country file
+country_file_int(CC, {ok, IoDevice}, Filesize) ->
+  read_country_file(CC, IoDevice, {[],[]}, Filesize, trunc(Filesize * ?PROGRESS_FRACTION));
+
+country_file_int(CC, {error, Reason}, _) ->
+  {error, io_lib:format("File ~s~s.txt: ~p",[?TARGET_DIR, CC, Reason])};
+
+%% The FCP.txt file has zero size, so download a new copy of the country's ZIP file from GeoNames.org, extract the text
+%% file and generate a newFCP.txt file
+country_file_int(CC, 0, CountryServerPid) when is_pid(CountryServerPid) ->
   Filename = ?COUNTRY_FILE_FULL(CC),
   Filesize = filelib:file_size(Filename),
 
-  ?TRACE("Importing ~s from full country file ~s", [format_as_binary_units(Filesize), Filename]),
+  ?TRACE("Internal FCP file does not exist. Importing ~s from full country file ~s", [format_as_binary_units(Filesize), Filename]),
 
-  country_file(CC, file:open(Filename, [read]), Filesize);
+  CountryServerPid ! country_file_int(CC, file:open(Filename, [read]), Filesize);
 
-%% Internal FCP file exists
-country_file(CC, FCP_Filesize) ->
+%% If the FCP.txt file exists (I.E. has non-zero size), then check whether it has become stale
+country_file_int(CC, FCP_Filesize, CountryServerPid) when is_pid(CountryServerPid) ->
   FCP_Filename = ?COUNTRY_FILE_FCP(CC),
   ?TRACE("Importing ~s from internal FCP country file ~s",[format_as_binary_units(FCP_Filesize), FCP_Filename]),
-  spawn(?MODULE, read_internal_country_file, [FCP_Filename, self(), get(my_name), get(trace)]),
-  
-  receive
-    Response -> Response
-  end.
+
+  CountryServerPid ! read_internal_country_file(FCP_Filename).
 
 %% ---------------------------------------------------------------------------------------------------------------------
-%% Read full country file
-country_file(CC, {ok, IoDevice}, Filesize) ->
-  read_country_file(CC, IoDevice, {[],[]}, Filesize, trunc(Filesize * ?PROGRESS_FRACTION));
-
-country_file(CC, {error, Reason}, _) ->
-  {error, io_lib:format("File ~s~s.txt: ~p",[?TARGET_DIR, CC, Reason])}.
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Read internal FCA or FCP country files
-read_internal_country_file({ok, BinData}, CallerPid, MyName, TraceOn) ->
-  put(trace, TraceOn),
-  CallerPid ! parse_fcp_file(BinData, MyName);
-
-read_internal_country_file({error, Reason}, CallerPid, _MyName, _TraceOn) ->
-  CallerPid ! {error, Reason};
-
-read_internal_country_file(FCP_Filename, CallerPid, MyName, TraceOn) ->
-  read_internal_country_file(file:read_file(FCP_Filename), CallerPid, MyName, TraceOn).
+%% Read internal FCP country files
+read_internal_country_file({ok, BinData})   -> parse_fcp_file(BinData);
+read_internal_country_file({error, Reason}) -> {error, Reason};
+read_internal_country_file(FCP_Filename)    -> read_internal_country_file(file:read_file(FCP_Filename)).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Parse internal FCP country file.  This is an Erlang lists of type #geoname_int
-parse_fcp_file(BinData, MyName) ->
-  country_manager ! {starting, loading_internal_file, MyName, progress, 0},
+parse_fcp_file(BinData) ->
+  country_manager ! {starting, loading_internal_file, get(my_name), progress, 0},
   ?TRACE("Starting memory usage: ~s",[format_as_binary_units(memory_usage(self()))]),
   ?TRACE("FCP file: Converting binary data to list"),
   StrData        = erlang:binary_to_list(BinData),
   
-  country_manager ! {starting, scanning_internal_file, MyName, progress, 25},
+  country_manager ! {starting, scanning_internal_file, get(my_name), progress, 25},
   ?TRACE("FCP file: Scanning list"),
   {ok, Terms, _} = erl_scan:string(StrData),
   
-  country_manager ! {starting, parsing_internal_file, MyName, progress, 25},
+  country_manager ! {starting, parsing_internal_file, get(my_name), progress, 25},
   ?TRACE("FCP file: Parsing terms"),
   {ok, Exprs}    = erl_parse:parse_exprs(Terms),
   
-  country_manager ! {starting, evaluating_internal_file, MyName, progress, 25},
+  country_manager ! {starting, evaluating_internal_file, get(my_name), progress, 25},
   ?TRACE("FCP file: Evaluating expressions"),
   {value, L, _}  = erl_eval:exprs(Exprs, []),
   
-  country_manager ! {starting, file_import, MyName, progress, complete},
+  country_manager ! {starting, file_import, get(my_name), progress, complete},
   ?TRACE("Ending memory usage: ~s",[format_as_binary_units(memory_usage(self()))]),
   L.
 
@@ -102,6 +93,8 @@ parse_fcp_file(BinData, MyName) ->
 read_country_file(CC, IoDevice, ListPair, Filesize, Stepsize) ->
   read_country_file(CC, IoDevice, io:get_line(IoDevice,""), ListPair, Filesize, Stepsize, 0).
 
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Reached EOF, so close the input file, dump FCA and FCP records to disc
 read_country_file(CC, IoDevice, eof, {FeatureClassA, FeatureClassP}, _, _, _) ->
   file:close(IoDevice),
@@ -272,3 +265,13 @@ wait_for_results(N, Acc) ->
 
   wait_for_results(N-1, Acc1).
 
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Locate a value in the dictionary of some other process
+read_process_dictionary(Pid, Name) ->
+  {dictionary, Dict} = erlang:process_info(Pid, dictionary),
+  search_dictionary(Name, Dict).
+
+search_dictionary(_,    [])                     -> undefined;
+search_dictionary(Name, [{Name, Value} | _])    -> Value;
+search_dictionary(Name, [{_, _}        | Rest]) -> search_dictionary(Name, Rest).

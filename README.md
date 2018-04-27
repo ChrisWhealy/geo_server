@@ -1,6 +1,6 @@
 #  geo_server
 
-A web server to provide worldwide town/city name lookup functionality.  The server accepts a text string of 3 or more characters as a search criteria and returns all towns and cities with a matching name.
+A web server to provide worldwide town/city name lookup functionality.  The server accepts a text string of 3 or more characters as a search criteria and returns all towns and cities with a matching name from anywhere in the world.
 
 This server is written in [Erlang](http://www.erlang.org/) using the [OTP framework](http://erlang.org/doc/) and the [Cowboy web server](https://ninenines.eu/)
 
@@ -17,12 +17,14 @@ Then edit the `manifest.yml` file and change the `route` parameter to point to y
 
 ##  Deploy to Cloud Foundry
 
-***IMPORTANT***  
-For performance reasons, all the geographic information supplied by this server is held in memory; therefore, this app requires 2048Mb of memory.  The `geo-server` will probably not fully start if this memory allowance is reduced.
-
 Deploy to Cloud Foundry using the following community build pack for Erlang:
 
     $ cf push -b https://github.com/ChrisWhealy/cf-buildpack-erlang
+
+***IMPORTANT***  
+For performance reasons, all the geographic information supplied by this server is held in memory; therefore, this app requires 2048Mb of memory.  The `geo-server` will probably not fully start if this memory allowance is reduced.
+
+Once all the country servers have fully started, the memory consumption drops to around 700Mb; however, if all the country servers are started simultaneously, nearly the full 2Gb of memory could be required.
 
 ##  Server Startup
 
@@ -50,11 +52,11 @@ The following startup sequence is performed for each country server:
 
 1. When a country server is started for the first time, a [ZIP file](http://download.geonames.org/export/dump/) containing all the geographic information for that country is downloaded from the GeoNames website.
 
-1. Once unzipped, the resulting text file contains a large amount of geographic information - much of which is not relevant for `geo-server`'s requirements.  Therefore, the text file is scanned only for those records having a feature class of "P" (population centres) and "A" (administrative areas).  All other records are ignored.
+1. Once unzipped, the resulting text file contains a large amount of geographic information - much of which is not relevant for `geo-server`'s requirements.  Therefore, the text file is scanned only for those records having feature class values of "P" (population centres) or "A" (administrative areas).  All other records are ignored.
 
     * A further restriction is imposed here that feature class "P" records must refer to towns or cities having a population greater than some arbitrary limit (currently set to 500).
 
-    * An internal file is created (`FCP.txt`) that contains the records from each feature class "p" record supplemented with the region information from the relevant feature class "A" records.  This data then becomes the searchable list of towns/cities for that particular country.
+    * An internal file is created (`FCP.txt`) that contains the records from each feature class "P" record supplemented with the region information from the relevant feature class "A" records.  This data then becomes the searchable list of towns/cities for that particular country.
 
     * Each time a country server is started, the existence of the `FCP.txt` file is checked.  If it exists and is not stale, then the country server will start using the information in `FCP.txt` rather than downloading the country's ZIP file again.  Starting a country server from its `FCP.txt` file greatly reduces the start up time from a few minutes down to a few seconds.
 
@@ -63,13 +65,13 @@ The following startup sequence is performed for each country server:
     * If the country server is restarted more than 24 hours after the eTag data was downloaded, then the local country data is considered potentially stale.  The eTag value is now used to check if a new version of the country file exists.  If it does, the new ZIP file is downloaded and a new `FCP.txt` file created.
 
 
-1. If you start a country server and find that it immediately stops with a substatus of `no_cities`, then this is simply means the country contains no towns or cities with a population greater than the population limit (currently set to 500)
+1. If you start a country server and find that it immediately stops with a substatus of `no_cities`, then this simply means the country contains no towns or cities with a population greater than the population limit (currently set to 500)
 
 
 
 ##  API
 
-In order to perform a serach, a client must send an HTTP `GET` request to the `geo-server` hostname with the path `/search`:
+In order to perform a search, a client must send an HTTP `GET` request to the `geo-server` hostname with the path `/search`:
 
 `geo-server.cfapps.<server>.hana.ondemand.com/search`
 
@@ -89,7 +91,7 @@ Similarly, to search for all cities starting with the whole word "london", the U
 
 ##  Response
 
-The client will receive a JSON array containing zero or more instances of a city object.  An example city object is shown below:
+The client will then receive a JSON array containing zero or more instances of a city object.  An example city object is shown below:
 
     {
       "name": "London",

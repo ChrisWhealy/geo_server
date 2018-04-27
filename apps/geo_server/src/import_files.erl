@@ -134,7 +134,7 @@ check_for_update(CountryCode) ->
       spawn(?MODULE, http_get_request, [self(), CountryCode, ".zip", get(trace)]),
       retry(wait_for_resources(1, zip), zip, 0);
 
-    false -> []
+    false -> done
   end.
 
 

@@ -203,7 +203,8 @@ wait_for_msgs(CountryServerList) ->
                , continent    = T#country_server.continent
                , country_code = T#country_server.country_code
                , status       = stopped
-               , trace        = false
+               , trace        = T#country_server.trace
+               , zip_size     = T#country_server.zip_size
                },
 
           RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, reason = T1},
@@ -451,6 +452,7 @@ set_server_status(CountryServerList, Name, stopped, Substatus, _, _, _) ->
 %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 %% Server identified by its name
 set_server_status(CountryServerList, Name, Status, Substatus, Progress, Children, Time) ->
+  ?TRACE("Changing status for ~p to ~p ~p",[Name, Status, Substatus]),
   Rec = lists:keyfind(Name, #country_server.name, CountryServerList),
 
   ServerStatus = #country_server{
@@ -501,7 +503,7 @@ set_server_status(CountryServerList, Name, Status, Substatus, Progress, Children
   , zip_size  = Rec#country_server.zip_size
   },
 
-  ?TRACE("Updated country_server is now ~p",[format_country_server_record(ServerStatus)]),
+  % ?TRACE("Updated country_server is now ~p",[format_country_server_record(ServerStatus)]),
 
   lists:keyreplace(Name, #country_server.name, CountryServerList, ServerStatus).
 

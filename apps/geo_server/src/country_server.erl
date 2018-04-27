@@ -42,7 +42,7 @@ start(CC, ServerName, Trace) ->
   put(cc, CC),
   put(city_count, unknown),
 
-  %% Trace and NetworkTrace flags supplied by the country manager
+  %% Trace flag supplied by the country manager
   put(trace, Trace),
 
   %% Inform country manager that this server is starting up
@@ -55,9 +55,12 @@ start(CC, ServerName, Trace) ->
   filelib:ensure_dir(TargetDir),
   import_files:check_for_update(CC),
 
-  CityServerList = case country_file_handler:country_file(CC) of
+  %% Read the country file data
+  spawn(country_file_handler, country_file, [CC, self()]),
+
+  CityServerList = receive
     {error, Reason} ->
-      exit({country_file_error, io_lib:format("~p",[Reason])}),
+      exit({country_file_error, Reason}),
       [];
 
     FCP_Data ->
