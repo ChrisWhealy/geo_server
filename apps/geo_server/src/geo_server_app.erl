@@ -93,6 +93,7 @@ start(_Type, _Args) ->
       ,{"/server_info",         cowboy_static, {priv_file, geo_server, "html/server_info.html"}}
       ,{"/js/server_info.js",   cowboy_static, {priv_file, geo_server, "js/server_info.js"}}
       ,{"/css/server_info.css", cowboy_static, {priv_file, geo_server, "css/server_info.css"}}
+      ,{"/img/[...]",           cowboy_static, {priv_dir,  geo_server, "img"}}
 		]}
 	]),
 

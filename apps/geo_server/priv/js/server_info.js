@@ -45,6 +45,9 @@ const fetch_server_info = () => {
 const startAllServers = () => sendCountryManagerCmd("start_all")
 const stopAllServers  = () => sendCountryManagerCmd("shutdown_all")
 
+const sortAscending  = col_name => sendCountryManagerCmd("sort_ascending", col_name)
+const sortDescending = col_name => sendCountryManagerCmd("sort_descending", col_name)
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Toggle country manager debug status
 // ---------------------------------------------------------------------------------------------------------------------
@@ -62,7 +65,8 @@ const sendCountryManagerCmd = (cmd, param) => {
   xhr.onload = evt => {
     if (xhr.readyState === 4) {
       if (xhr.status === 200) {
-        console.log(xhr.responseText)
+        var cmdResponseObj = JSON.parse(xhr.responseText)
+        document.getElementById("country_servers").innerHTML = htmlGenElement(build_server_table(cmdResponseObj.reason))
       }
       else {
         show_error(xhr.statusText)
@@ -138,10 +142,7 @@ const show_status = responseText => {
     htmlGenElement(info_table) +
     htmlGenElement(cmdBtnsDiv)
 
-  // At the moment, the server table is only sorted by ZIP file size
-  serverTable = build_table_by_size(serverObj.servers)
-
-  document.getElementById("country_servers").innerHTML = htmlGenElement(serverTable)
+  document.getElementById("country_servers").innerHTML = htmlGenElement(build_server_table(serverObj.servers))
 }
 
 const show_error = statusText => alert(statusText)
@@ -208,6 +209,17 @@ const build_cmd_buttons = () => {
   return [startBtn, stopBtn]
 }
 
+const sortable_column = (col_heading, col_name) => {
+  var sort_asc  = htmlElement("img",[htmlParam("onclick","sortAscending('" + col_name + "')"),
+                                     htmlParam("src","/img/up.png"),
+                                     htmlParam("title","Sort Ascending")])
+  var sort_desc = htmlElement("img",[htmlParam("onclick","sortDescending('" + col_name + "')"),
+                                     htmlParam("src","/img/down.png"),
+                                     htmlParam("title","Sort Descending")])
+
+  return htmlElement("div", htmlParam("style","display: inline;"), [col_heading, sort_asc, sort_desc])
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Create HTML elements for server status table
 // ---------------------------------------------------------------------------------------------------------------------
@@ -215,7 +227,7 @@ const city_total = (acc, country) => acc += country.city_count
 
 const build_table_by_continent = servers => { }
 
-const build_table_by_size = servers => {
+const build_server_table = servers => {
   var table_hdr  = build_column_headers()
   var table_body = servers.map(build_table_row)
 
@@ -231,17 +243,18 @@ const build_table_row = country => {
 const build_table_columns = country => 
   [ htmlElement("td", [TD_ALIGN("center")], build_action_button(country))
   , htmlElement("td", [TD_ALIGN("center")], build_trace_checkbox(country.country_code, country.trace))
-  , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.country_code)
+  , htmlElement("td", [status_colour(country.status, country.substatus)], get_continent_name(country.continent))
   , htmlElement("td", [status_colour(country.status, country.substatus)], country.country_name)
+  , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.country_code)
   , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.status)
   , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.substatus)
   , htmlElement("td", [TD_ALIGN("right")], country.progress)
   , htmlElement("td", [TD_ALIGN("right")], country.city_count)
   , htmlElement("td", [TD_ALIGN("right")], country.children)
+  , htmlElement("td", [TD_ALIGN("right")], format_as_binary_units(country.mem_usage))
+  , htmlElement("td", [TD_ALIGN("right")], format_as_binary_units(country.zip_size))
   , htmlElement("td", [TD_ALIGN("right")], country.started_at)
-  , htmlElement("td", [TD_ALIGN("right")], country.start_complete)
-  , htmlElement("td", [TD_ALIGN("right")], country.mem_usage)
-  , htmlElement("td", [TD_ALIGN("right")], country.zip_size)
+  , htmlElement("td", [TD_ALIGN("right")], ms_to_seconds(country.startup_time))
   ]
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -272,17 +285,18 @@ const build_continent_header = ContName => htmlElement('tr', null, htmlElement('
 const build_column_headers = () =>
   htmlElement('tr', null, [ htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Action')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Trace')
-                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'ISO')
-                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Country')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('Continent', 'continent'))
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('Country', 'country_name'))
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('ISO', 'country_code'))
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Status')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Substatus')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Progress')
-                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'City Count')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('City Count', 'city_count'))
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'City Servers')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('Memory Usage', 'mem_usage'))
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('ZIP File Size', 'zip_size'))
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Started At')
-                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Startup Time')
-                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Memory Usage')
-                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'ZIP File Size')
+                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('Startup Time', 'startup_time'))
                           ])
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -384,3 +398,43 @@ const BG_LIGHT_GREY = () => htmlParam("style", "background-color: #EEEEEE;")
 const TD_ALIGN = dir => htmlParam("style", "text-align: " + dir + ";")
 
 const TH_TEXT_COLOUR = col => htmlParam("style", "color: " + col + ";")
+
+const BR = htmlElement("br")
+
+
+
+const KB = 1024
+const MB = 1048576
+const GB = 1073741824
+
+const format_as_binary_units = n =>
+  (isNullOrUndef(n))
+  ? "0 bytes"
+  : (n < KB)
+    ? n + " bytes"
+    : (n < MB)
+      ? format_as_binary_units_int(n, KB, "Kb")
+      : (n < GB)
+        ? format_as_binary_units_int(n, MB, "Mb")
+        : format_as_binary_units_int(n. GB, "Gb")
+
+
+const format_as_binary_units_int = (n, unit, unitStr) => {
+  var wholeUnits = Math.floor(n / unit)
+  var rem = (n - (wholeUnits * unit)) / unit
+
+  return parseFloat(wholeUnits + rem).toFixed(3) + " " + unitStr
+}
+
+const ms_to_seconds = ms => isNullOrUndef(ms) ? "" : parseFloat(ms).toFixed(3) + "s"
+
+
+const get_continent_name = cn =>
+  (cn === "AF") ? "Africa"
+: (cn === "AN") ? "Antarctica"
+: (cn === "AS") ? "Asia"
+: (cn === "EU") ? "Europe"
+: (cn === "NA") ? "North America"
+: (cn === "OC") ? "Oceana"
+: (cn === "SA") ? "South America"
+: "Unknown: " + cn

@@ -9,8 +9,6 @@
     import_country_info/1
   , http_get_request/4
   , http_head_request/3
-  , write_file/2
-  , write_file/4
   , move_file/4
   , handle_zip_file/4
   , check_for_update/1
@@ -232,6 +230,7 @@ wait_for_resources(Count, Fun, RetryList) ->
       filelib:ensure_dir(TargetDir),
 
       ?TRACE("Received ~s with ETag ~s",[Filename ++ Ext, Etag]),
+      io:format("Country file ~s data in temp file ~s~n",[Filename, TempFilename]),
       
       %% If an ETag is included in the HTTP response, then write it to disc
       case Etag of
@@ -282,8 +281,8 @@ parse_countries_file({error, Reason}) -> {error, Reason}.
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
-%% Read the countries file and create a list of country codes skipping any lines
-%% that import_country_info with a hash character
+%% Read the countries file and create a list of country codes skipping any lines that import_country_info with a hash
+%% character
 read_countries_file(IoDevice, []) ->
   read_countries_file(IoDevice, io:get_line(IoDevice,""), []).
 

@@ -34,17 +34,44 @@ init(Req=#{method := ?HTTP_GET}, State) ->
         <<"false">> -> country_manager ! {cmd, trace, off, self()}
       end;
 
+    <<"sort_ascending">> ->
+      #{param := Param} = cowboy_req:match_qs([param], Req),
+
+      country_manager ! {sort, ascending, binary_to_atom(Param, utf8), self()};
+
+    <<"sort_descending">> ->
+      #{param := Param} = cowboy_req:match_qs([param], Req),
+
+      country_manager ! {sort, descending, binary_to_atom(Param, utf8), self()};
+
     <<"start_all">>    -> country_manager ! {cmd, start_all,    self()};
     <<"shutdown_all">> -> country_manager ! {cmd, shutdown_all, self()}
   end,
 
   %% Wait for command response
   JsonResp = receive
+    %% General command response
     CmdResponse when is_record(CmdResponse, cmd_response) ->
       record_to_json(cmd_response, CmdResponse);
 
+    %% Sorted country server list
+    CountryServerList when is_list(CountryServerList) ->
+      CmdResp = #cmd_response{
+        from_server = country_manager
+      , cmd         = binary_to_atom(Cmd, utf8)
+      , status      = ok
+      , reason      = make_json_array([ record_to_json(country_server, Svr) || Svr <- CountryServerList ])
+      },
+      record_to_json(cmd_response, CmdResp);
+
+    %% Unrecognised response
     SomeVal ->
-      CmdResp = #cmd_response{from_server = country_manager, cmd = Cmd, status = error, reason = SomeVal},
+      CmdResp = #cmd_response{
+        from_server = country_manager
+      , cmd         = Cmd
+      , status      = error
+      , reason      = SomeVal
+      },
       record_to_json(cmd_response, CmdResp)
   end,
 

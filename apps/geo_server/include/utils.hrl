@@ -117,22 +117,9 @@ record_to_json(cmd_response, Rec) ->
 
 record_to_json(country_server, Rec) ->
   %% Format all internal values in the record
-  R1 = #country_server{
-      name           = Rec#country_server.name
-    , country_name   = Rec#country_server.country_name
-    , continent      = Rec#country_server.continent
-    , country_code   = Rec#country_server.country_code
-    , pid            = Rec#country_server.pid
-    , status         = Rec#country_server.status
-    , substatus      = Rec#country_server.substatus
-    , progress       = Rec#country_server.progress
-    , city_count     = Rec#country_server.city_count
-    , children       = len(Rec#country_server.children)
-    , started_at     = format_datetime(Rec#country_server.started_at)
-    , start_complete = format_seconds(time_diff(Rec#country_server.start_complete, Rec#country_server.started_at))
-    , trace          = Rec#country_server.trace
-    , mem_usage      = format_as_binary_units(Rec#country_server.mem_usage)
-    , zip_size       = format_as_binary_units(Rec#country_server.zip_size)
+  R1 = Rec#country_server{
+      children   = len(Rec#country_server.children)
+    , started_at = format_datetime(Rec#country_server.started_at)
     },
 
   kv_to_json(kv_country_server_record(R1)).
@@ -169,8 +156,8 @@ len(L) when is_list(L) -> length(L).
 %%  o  Two custom Erlang DateTimes with additional microseconds part
 %%  o  Two standard Erlang Timestamps
 %%
-%% The first parameter is always assumed to be later (bigger) than the second and
-%% the result is truncated to the nearest millisecond
+%% The first parameter is always assumed to be later (bigger) than the second and the result is truncated to the nearest
+%% millisecond
 
 time_diff(_, undefined) -> undefined;
 time_diff(undefined, _) -> undefined;

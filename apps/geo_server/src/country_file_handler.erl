@@ -21,6 +21,12 @@
 -define(MIN_POPULATION, 500).
 
 
+%% =====================================================================================================================
+%%
+%%                                                 P U B L I C   A P I
+%%
+%% =====================================================================================================================
+
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Import the internal FCP file if it exists, else import the full country text file.
 country_file(CC, CountryServerPid) when is_pid(CountryServerPid) ->
@@ -32,6 +38,14 @@ country_file(CC, CountryServerPid) when is_pid(CountryServerPid) ->
   country_file_int(CC, filelib:file_size(?COUNTRY_FILE_FCP(CC)), CountryServerPid).
 
 
+
+%% =====================================================================================================================
+%%
+%%                                                P R I V A T E   A P I
+%%
+%% =====================================================================================================================
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Read full country file
 country_file_int(CC, {ok, IoDevice}, Filesize) ->
   read_country_file(CC, IoDevice, {[],[]}, Filesize, trunc(Filesize * ?PROGRESS_FRACTION));
@@ -42,50 +56,15 @@ country_file_int(CC, {error, Reason}, _) ->
 %% The FCP.txt file has zero size, so download a new copy of the country's ZIP file from GeoNames.org, extract the text
 %% file and generate a newFCP.txt file
 country_file_int(CC, 0, CountryServerPid) when is_pid(CountryServerPid) ->
-  Filename = ?COUNTRY_FILE_FULL(CC),
-  Filesize = filelib:file_size(Filename),
+  Filesize = filelib:file_size(?COUNTRY_FILE_FULL(CC)),
+  ?TRACE("Internal FCP file does not exist. Importing ~s from full country file ~s", [format_as_binary_units(Filesize), ?COUNTRY_FILE_FULL(CC)]),
+  CountryServerPid ! country_file_int(CC, file:open(?COUNTRY_FILE_FULL(CC), [read]), Filesize);
 
-  ?TRACE("Internal FCP file does not exist. Importing ~s from full country file ~s", [format_as_binary_units(Filesize), Filename]),
-
-  CountryServerPid ! country_file_int(CC, file:open(Filename, [read]), Filesize);
-
-%% If the FCP.txt file exists (I.E. has non-zero size), then check whether it has become stale
+%% Import the internal <CC>_fcp.txt file
 country_file_int(CC, FCP_Filesize, CountryServerPid) when is_pid(CountryServerPid) ->
-  FCP_Filename = ?COUNTRY_FILE_FCP(CC),
-  ?TRACE("Importing ~s from internal FCP country file ~s",[format_as_binary_units(FCP_Filesize), FCP_Filename]),
-
-  CountryServerPid ! read_internal_country_file(FCP_Filename).
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Read internal FCP country files
-read_internal_country_file({ok, BinData})   -> parse_fcp_file(BinData);
-read_internal_country_file({error, Reason}) -> {error, Reason};
-read_internal_country_file(FCP_Filename)    -> read_internal_country_file(file:read_file(FCP_Filename)).
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Parse internal FCP country file.  This is an Erlang lists of type #geoname_int
-parse_fcp_file(BinData) ->
-  country_manager ! {starting, loading_internal_file, get(my_name), progress, 0},
-  ?TRACE("Starting memory usage: ~s",[format_as_binary_units(memory_usage(self()))]),
-  ?TRACE("FCP file: Converting binary data to list"),
-  StrData        = erlang:binary_to_list(BinData),
-  
-  country_manager ! {starting, scanning_internal_file, get(my_name), progress, 25},
-  ?TRACE("FCP file: Scanning list"),
-  {ok, Terms, _} = erl_scan:string(StrData),
-  
-  country_manager ! {starting, parsing_internal_file, get(my_name), progress, 25},
-  ?TRACE("FCP file: Parsing terms"),
-  {ok, Exprs}    = erl_parse:parse_exprs(Terms),
-  
-  country_manager ! {starting, evaluating_internal_file, get(my_name), progress, 25},
-  ?TRACE("FCP file: Evaluating expressions"),
-  {value, L, _}  = erl_eval:exprs(Exprs, []),
-  
-  country_manager ! {starting, file_import, get(my_name), progress, complete},
-  ?TRACE("Ending memory usage: ~s",[format_as_binary_units(memory_usage(self()))]),
-  L.
+  ?TRACE("Importing ~s from internal FCP country file ~s",[format_as_binary_units(FCP_Filesize), ?COUNTRY_FILE_FCP(CC)]),
+  {ok, [FCP_Data | _]} = file:consult(?COUNTRY_FILE_FCP(CC)),
+  CountryServerPid ! FCP_Data.
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
@@ -93,8 +72,6 @@ parse_fcp_file(BinData) ->
 read_country_file(CC, IoDevice, ListPair, Filesize, Stepsize) ->
   read_country_file(CC, IoDevice, io:get_line(IoDevice,""), ListPair, Filesize, Stepsize, 0).
 
-
-%% ---------------------------------------------------------------------------------------------------------------------
 %% Reached EOF, so close the input file, dump FCA and FCP records to disc
 read_country_file(CC, IoDevice, eof, {FeatureClassA, FeatureClassP}, _, _, _) ->
   file:close(IoDevice),
@@ -225,10 +202,10 @@ keep_feature_codes_for_class(<<"A">>, Rec, _Pop) ->
     _           -> false
   end;
 
-%% Only keep population centres having a population greater than some limit
-%% For smaller countries, the situation might exist in which the administrative
-%% centres have a population above the threshold, but all the individual
-%% population centres are below the threshold
+%% Only keep population centres having a population greater than the limit defined in ?MIN_POPULATION
+%% For smaller countries, the situation might exist in which the administrative centres have a population above the
+%% threshold, but all the individual population centres within it are below the threshold.  This will result in zero
+%% population centres being extracted
 keep_feature_codes_for_class(<<"P">>, Rec, Pop) when Pop >= ?MIN_POPULATION ->
   case Rec#geoname_int.feature_code of
     <<"PPL">>   -> {true, p};

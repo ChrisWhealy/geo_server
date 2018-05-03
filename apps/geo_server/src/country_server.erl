@@ -50,9 +50,9 @@ start(CC, ServerName, Trace) ->
 
   %% Ensure that the country directory exists, then check if the country file needs to be updated
   TargetDir = ?TARGET_DIR ++ CC ++ "/",
+  filelib:ensure_dir(TargetDir),
   ?TRACE("Starting country server ~s in ~s",[CC, TargetDir]),
 
-  filelib:ensure_dir(TargetDir),
   import_files:check_for_update(CC),
 
   %% Read the country file data
