@@ -8,6 +8,7 @@
 -export([init/3]).
 
 -include("../include/trace.hrl").
+-include("../include/utils_memory_usage.hrl").
 -include("../include/rec_geoname.hrl").
 
 
@@ -50,7 +51,7 @@ wait_for_msg(ParentPid, Id, CityList) ->
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Memory usage command
     {cmd, mem_usage, RequestHandlerPid} ->
-      RequestHandlerPid ! own_memory_usage();
+      RequestHandlerPid ! memory_usage(self());
 
     %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     %% Search city list
@@ -83,14 +84,5 @@ make_reg_exp(Q, true,  false) -> << <<"\\b(">>/binary, (list_to_binary(Q))/binar
 make_reg_exp(Q, true,  true)  -> <<   <<"^(">>/binary, (list_to_binary(Q))/binary, <<")\\b">>/binary >>;
 make_reg_exp(Q, false, true)  -> <<   <<"^(">>/binary, (list_to_binary(Q))/binary, <<")">>/binary >>;
 make_reg_exp(Q, false, false) -> <<    <<"(">>/binary, (list_to_binary(Q))/binary, <<")">>/binary >>.
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Get own memory usage
-own_memory_usage() ->
-  case process_info(self(), memory) of
-    undefined   -> 0;  %% This would be weird!
-    {memory, N} -> N
-  end.
 
 

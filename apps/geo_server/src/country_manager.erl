@@ -15,10 +15,18 @@
 -define(RETRY_LIMIT, 3).
 -define(RETRY_WAIT,  5000).
 
+%% Include record definitions first
+-include("../include/rec_cmd_response.hrl").
+-include("../include/rec_country_server.hrl").
+
+%% Include various utilities
 -include("../include/trace.hrl").
 -include("../include/now.hrl").
--include("../include/utils.hrl").
--include("../include/manage_server_status.hrl").
+-include("../include/utils_time.hrl").
+-include("../include/utils_format_time.hrl").
+-include("../include/utils_memory_usage.hrl").
+-include("../include/utils_json_transform.hrl").
+-include("../include/utils_server_status.hrl").
 
 
 %% =====================================================================================================================
@@ -188,7 +196,7 @@ wait_for_msgs(CountryServerList) ->
       ?TRACE("Shutdown all country servers but keep country_manager running"),
       put(shutdown, false),
       CountryServerList1 = stop_all_country_servers(CountryServerList),
-      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown_all, status = ok},
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown_all, status = ok, payload = CountryServerList1},
       CountryServerList1;
 
     %% Shutdown all country servers and then shutdown the country manager
@@ -224,7 +232,7 @@ wait_for_msgs(CountryServerList) ->
                , zip_size     = T#country_server.zip_size
                },
 
-          RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, reason = T1},
+          RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, payload = T1},
 
           lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1)
       end;
@@ -250,7 +258,7 @@ wait_for_msgs(CountryServerList) ->
             _ ->
               T1 = start_country_server(T),
               {lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1),
-               #cmd_response{from_server = country_manager, cmd = start, status = ok, reason = T1}}
+               #cmd_response{from_server = country_manager, cmd = start, status = ok, payload = T1}}
           end;
 
         _Pid ->
@@ -265,12 +273,12 @@ wait_for_msgs(CountryServerList) ->
     {cmd, start_all, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       ?TRACE("Starting all country servers"),
       CountryServerList1 = start_all_country_servers(CountryServerList),
-      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = start_all, status = ok},
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = start_all, status = ok, payload = CountryServerList1},
       CountryServerList1;
 
 
     %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-    %% Reset a crashed country server
+    %% Reset a single country server that has crashed
     %%
     {cmd, reset, CC, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       CountryServerName = ?COUNTRY_SERVER_NAME(CC),
@@ -280,13 +288,32 @@ wait_for_msgs(CountryServerList) ->
         crashed ->
           ?TRACE("Reseting crashed server ~p",[CountryServerName]),
           S1 = reset_crashed_server(S),
-          RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = reset, status = ok, reason = S1},
+          RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = reset, status = ok, payload = S1},
           lists:keyreplace(CountryServerName, #country_server.name, CountryServerList, S1);
 
         _ ->
           RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = reset, status = error, reason = server_not_crashed},
           CountryServerList
       end;
+
+  
+
+    %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+    %% Reset all crashed country servers
+    %%
+    {cmd, reset_all, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
+      CountryServerList1 = [
+        (fun(S) ->
+          case S#country_server.status of
+            crashed -> reset_crashed_server(S);
+            _       -> S
+          end
+        end)(Svr)
+        || Svr <- CountryServerList
+        ],
+      
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = reset_all, status = ok, payload = CountryServerList1},
+      CountryServerList1;
 
   
 
@@ -300,35 +327,31 @@ wait_for_msgs(CountryServerList) ->
         off -> put(trace, false)
       end,
 
-      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = set_debug, status = ok},
+      RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = trace, status = ok, payload = TraceState},
       CountryServerList;
 
     %% Turn trace on/off for an individual country server
-    %% The value bound to Trace must be either trace_on or trace_off
+    %% The value bound to Trace must be either of the atoms 'trace_on' or 'trace_off'
     {cmd, Trace, CC, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       CountryServerName = ?COUNTRY_SERVER_NAME(CC),
       S = lists:keyfind(CountryServerName, #country_server.name, CountryServerList),
 
-      {Status, Reason, Trace1} = case S of
-        false ->
-          {error, no_such_country_server, trace_off};
-        _ ->
-          case S#country_server.substatus of
-            running ->
-              ?TRACE("Sending ~p to ~p",[Trace, CountryServerName]),
-              S#country_server.name ! {cmd, Trace},
-              {ok, undefined, Trace};
-            _ ->
-              {ok, undefined, Trace}
-          end
-        end,
+      {Status, Reason} = case S of
+        false -> {error, no_such_country_server};
+        _     -> case S#country_server.substatus of
+                   running -> S#country_server.name ! {cmd, Trace};
+                   _       -> ok
+                 end,
+
+                 {ok, undefined}
+      end,
 
       RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = Trace, status = Status, reason = Reason},
 
       %% Only update the CountryServerList if the trace state has changed
-      case S#country_server.trace == trace_state_to_boolean(Trace1) of
+      case S#country_server.trace == trace_state_to_boolean(Trace) of
         true  -> CountryServerList;
-        false -> lists:keyreplace(CountryServerName, #country_server.name, CountryServerList, update_trace(S, Trace1))
+        false -> lists:keyreplace(CountryServerName, #country_server.name, CountryServerList, update_trace(S, Trace))
       end
   end,
 

@@ -8,10 +8,17 @@
 
 -export([init/2]).
 
+%% Include record definitions first
+-include("../include/rec_cmd_response.hrl").
+-include("../include/rec_country_server.hrl").
 
+
+%% Include variuous utilities
 -include("../include/trace.hrl").
 -include("../include/default_http_response.hrl").
--include("../include/utils.hrl").
+-include("../include/utils_json_transform.hrl").
+-include("../include/utils_time.hrl").
+-include("../include/utils_format_time.hrl").
 
 -define(HTTP_GET, <<"GET">>).
 
@@ -39,14 +46,23 @@ init(Req=#{method := ?HTTP_GET}, State) ->
     <<"trace_off">> -> send_country_server_cmd(Req, trace_off)
   end,
 
-  %% Wait for command response
+  %% What response did we receive?
   JsonResp = receive
+    %% A general command response tuple
     CmdResponse when is_record(CmdResponse, cmd_response) ->
       record_to_json(cmd_response, CmdResponse);
 
+    %% Any unrecognised message is assumed to be an error
     SomeVal ->
-      record_to_json(cmd_response,
-                     #cmd_response{from_server = country_manager, cmd = Cmd, status = error, reason = SomeVal})
+      CmdResp = #cmd_response{
+        from_server = country_manager
+      , cmd         = Cmd
+      , status      = error
+      , reason      = unrecognised_message
+      , payload     = SomeVal
+      },
+
+      record_to_json(cmd_response, CmdResp)
   end,
 
   {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, JsonResp, Req), State};

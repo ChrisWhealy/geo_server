@@ -18,7 +18,7 @@
 -include("../include/http_status_codes.hrl").
 -include("../include/file_paths.hrl").
 -include("../include/now.hrl").
--include("../include/utils.hrl").
+-include("../include/utils_time.hrl").
 
 -define(STALE_AFTER, 86400).
 -define(RETRY_WAIT,  5000).

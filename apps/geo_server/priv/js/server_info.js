@@ -40,10 +40,11 @@ const fetch_server_info = () => {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Send commands to the country manager
+// Country manager commands
 // ---------------------------------------------------------------------------------------------------------------------
-const startAllServers = () => sendCountryManagerCmd("start_all")
-const stopAllServers  = () => sendCountryManagerCmd("shutdown_all")
+const startAllServers     = () => sendCountryManagerCmd("start_all")
+const stopAllServers      = () => sendCountryManagerCmd("shutdown_all")
+const resetCrashedServers = () => sendCountryManagerCmd("reset_all")
 
 const sortAscending  = col_name => sendCountryManagerCmd("sort_ascending", col_name)
 const sortDescending = col_name => sendCountryManagerCmd("sort_descending", col_name)
@@ -54,10 +55,13 @@ const sortDescending = col_name => sendCountryManagerCmd("sort_descending", col_
 const toggleCountryManagerDebug = state       => sendCountryManagerCmd("set_debug", state)
 const toggleCountryServerDebug  = (cc, state) => sendCountryServerCmd(cc, (state ? "trace_on" : "trace_off"))
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Send a command to the country manager
+// ---------------------------------------------------------------------------------------------------------------------
 const sendCountryManagerCmd = (cmd, param) => {
   var xhr = new XMLHttpRequest()
 
-  if (param === undefined)
+  if (isNullOrUndef(param))
     xhr.open("GET", url_country_manager_cmd + "?cmd=" + cmd, true)
   else
     xhr.open("GET", url_country_manager_cmd + "?cmd=" + cmd + "&param=" + param, true)
@@ -66,7 +70,18 @@ const sendCountryManagerCmd = (cmd, param) => {
     if (xhr.readyState === 4) {
       if (xhr.status === 200) {
         var cmdResponseObj = JSON.parse(xhr.responseText)
-        document.getElementById("country_servers").innerHTML = htmlGenElement(build_server_table(cmdResponseObj.reason))
+
+        // Was the command successful?
+        if (cmdResponseObj.status && cmdResponseObj.status === "error") {
+          // Nope, something went wrong
+          alert(cmdResponseObj.from_server + " " +
+                cmdResponseObj.cmd + " " +
+                cmdResponseObj.status + " " +
+                cmdResponseObj.reason)
+        }
+        // We've received a payload that is assumed to be a list of country servers
+        else if (isArray(cmdResponseObj.payload))
+          document.getElementById("country_servers").innerHTML = htmlGenElement(build_server_table(cmdResponseObj.payload))
       }
       else {
         show_error(xhr.statusText)
@@ -94,19 +109,19 @@ const sendCountryServerCmd = (cc,cmd) => {
   xhr.onload = evt => {
     if (xhr.readyState === 4) {
       if (xhr.status === 200) {
-        var cmd_response = JSON.parse(xhr.responseText)
+        var cmdResponseObj = JSON.parse(xhr.responseText)
 
-        if (cmd_response.status && cmd_response.status === "error") {
-          alert(cmd_response.from_server + " " +
-                cmd_response.cmd + " " +
-                cmd_response.status + " " +
-                cmd_response.reason)
+        if (cmdResponseObj.status && cmdResponseObj.status === "error") {
+          alert(cmdResponseObj.from_server + " " +
+                cmdResponseObj.cmd + " " +
+                cmdResponseObj.status + " " +
+                cmdResponseObj.reason)
         }
         else {
-          if (cmd_response.cmd === "start"    ||
-              cmd_response.cmd === "shutdown" ||
-              cmd_response.cmd === "reset") {
-            var newRec = cmd_response.reason
+          if (cmdResponseObj.cmd === "start"    ||
+              cmdResponseObj.cmd === "shutdown" ||
+              cmdResponseObj.cmd === "reset") {
+            var newRec = cmdResponseObj.payload
             var oldRec = document.getElementById(newRec.name)
 
             oldRec.innerHTML = build_table_columns(newRec).map(htmlGenElement).join('\n')
@@ -136,7 +151,7 @@ const show_status = responseText => {
   var cityRow = build_city_total_row(serverObj.servers.reduce(city_total, 0))
 
   var info_table = htmlElement("table", null, [cbRow, memRow, cityRow])
-  var cmdBtnsDiv = htmlElement("div", null, build_cmd_buttons())
+  var cmdBtnsDiv = htmlElement("div", null, build_cmd_buttons(serverObj.servers))
 
   document.getElementById("server_status").innerHTML =
     htmlGenElement(info_table) +
@@ -198,15 +213,23 @@ const build_city_total_row = cities =>
               [htmlElement("td", TD_ALIGN("right"), "Total number of cities"),
                htmlElement("td", TD_ALIGN("left"), cities)])
 
-const build_cmd_buttons = () => {
+const build_cmd_buttons = serverList => {
+  var retVal = []
   var startBtn = htmlElement('button',
                              [htmlParam("onclick","startAllServers()")],
                              "Start all servers")
+  retVal.push(startBtn)
+
   var stopBtn  = htmlElement('button',
                              [htmlParam('onclick','stopAllServers()')],
                              "Stop all servers")
+  retVal.push(stopBtn)
 
-  return [startBtn, stopBtn]
+  if (serverList.reduce((acc, svr) => svr.status === "crashed" || acc, false)) {
+    retVal.push(htmlElement('button', [htmlParam('onclick','resetCrashedServers()')], "Reset crashed servers"))
+  }
+
+  return retVal
 }
 
 const sortable_column = (col_heading, col_name) => {
@@ -250,7 +273,7 @@ const build_table_columns = country =>
   , htmlElement("td", [TD_ALIGN("center"), status_colour(country.status, country.substatus)], country.substatus)
   , htmlElement("td", [TD_ALIGN("right")], country.progress)
   , htmlElement("td", [TD_ALIGN("right")], country.city_count)
-  , htmlElement("td", [TD_ALIGN("right")], country.children)
+  , htmlElement("td", [TD_ALIGN("right")], length(country.children))
   , htmlElement("td", [TD_ALIGN("right")], format_as_binary_units(country.mem_usage))
   , htmlElement("td", [TD_ALIGN("right")], format_as_binary_units(country.zip_size))
   , htmlElement("td", [TD_ALIGN("right")], country.started_at)
@@ -388,6 +411,7 @@ const htmlGenElement = el => {
  */
 const isArray       = obj => !!obj && obj.constructor === Array
 const isNullOrUndef = obj => obj === null || obj === undefined || obj === "null" || obj === "undefined"
+const length        = obj => isNullOrUndef(obj) ? 0 : obj.length
 
 const BG_RED        = () => htmlParam("style", "background-color: #EE4466;")
 const BG_GREEN      = () => htmlParam("style", "background-color: #90EE90;")

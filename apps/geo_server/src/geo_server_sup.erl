@@ -43,11 +43,11 @@ stop(_State) ->
 
   % Wait for shutdown response
   receive
-    {cmd_response, goodbye} ->
+    {cmd_response, _FromServer, _Cmd, goodbye, _Reason, _Payload} ->
       exit(normal);
 
     SomeVal ->
-      io:format("geo_server supervisor received an unexpected response after issuing the 'terminate' command: ~p~n",[SomeVal]),
+      io:format("geo_server supervisor received an unexpected message after issuing the 'terminate' command: ~p~n",[SomeVal]),
       exit({supervisor_shutdown_error, SomeVal})
   end.
 

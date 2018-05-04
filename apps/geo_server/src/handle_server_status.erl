@@ -8,8 +8,17 @@
 
 -export([init/2]).
 
+%% Include record definitions first
+-include("../include/rec_cmd_response.hrl").
+-include("../include/rec_country_server.hrl").
+
+
+%% Include various utilities
 -include("../include/default_http_response.hrl").
--include("../include/utils.hrl").
+-include("../include/utils_format_binary.hrl").
+-include("../include/utils_json_transform.hrl").
+-include("../include/utils_time.hrl").
+-include("../include/utils_format_time.hrl").
 
 -define(HTTP_GET, <<"GET">>).
 

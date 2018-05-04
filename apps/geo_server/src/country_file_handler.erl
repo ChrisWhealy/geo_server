@@ -10,7 +10,7 @@
   ]).
 
 -include("../include/trace.hrl").
--include("../include/utils.hrl").
+-include("../include/utils_format_binary.hrl").
 -include("../include/file_paths.hrl").
 -include("../include/rec_geoname.hrl").
 
@@ -54,7 +54,7 @@ country_file_int(CC, {error, Reason}, _) ->
   {error, io_lib:format("File ~s~s.txt: ~p",[?TARGET_DIR, CC, Reason])};
 
 %% The FCP.txt file has zero size, so download a new copy of the country's ZIP file from GeoNames.org, extract the text
-%% file and generate a newFCP.txt file
+%% file and generate a new FCP.txt file
 country_file_int(CC, 0, CountryServerPid) when is_pid(CountryServerPid) ->
   Filesize = filelib:file_size(?COUNTRY_FILE_FULL(CC)),
   ?TRACE("Internal FCP file does not exist. Importing ~s from full country file ~s", [format_as_binary_units(Filesize), ?COUNTRY_FILE_FULL(CC)]),
@@ -244,7 +244,7 @@ wait_for_results(N, Acc) ->
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
-%% Locate a value in the dictionary of some other process
+%% Locate a value in the process dictionary of some other process
 read_process_dictionary(Pid, Name) ->
   {dictionary, Dict} = erlang:process_info(Pid, dictionary),
   search_dictionary(Name, Dict).

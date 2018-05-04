@@ -8,8 +8,16 @@
 
 -export([init/2]).
 
+%% Include record definitions first
+-include("../include/rec_cmd_response.hrl").
+-include("../include/rec_country_server.hrl").
+
+
+%% Include various utilities
 -include("../include/default_http_response.hrl").
--include("../include/utils.hrl").
+-include("../include/utils_json_transform.hrl").
+-include("../include/utils_time.hrl").
+-include("../include/utils_format_time.hrl").
 
 -define(HTTP_GET, <<"GET">>).
 
@@ -45,32 +53,34 @@ init(Req=#{method := ?HTTP_GET}, State) ->
       country_manager ! {sort, descending, binary_to_atom(Param, utf8), self()};
 
     <<"start_all">>    -> country_manager ! {cmd, start_all,    self()};
-    <<"shutdown_all">> -> country_manager ! {cmd, shutdown_all, self()}
+    <<"shutdown_all">> -> country_manager ! {cmd, shutdown_all, self()};
+    <<"reset_all">>    -> country_manager ! {cmd, reset_all,    self()}
   end,
 
-  %% Wait for command response
+  %% What response did we get?
   JsonResp = receive
-    %% General command response
+    %% A general command response tuple
     CmdResponse when is_record(CmdResponse, cmd_response) ->
       record_to_json(cmd_response, CmdResponse);
 
-    %% Sorted country server list
+    %% A country server list
     CountryServerList when is_list(CountryServerList) ->
       CmdResp = #cmd_response{
         from_server = country_manager
       , cmd         = binary_to_atom(Cmd, utf8)
       , status      = ok
-      , reason      = make_json_array([ record_to_json(country_server, Svr) || Svr <- CountryServerList ])
+      , payload     = make_json_array([ record_to_json(country_server, Svr) || Svr <- CountryServerList ])
       },
       record_to_json(cmd_response, CmdResp);
 
-    %% Unrecognised response
+    %% Any unrecognised message is assumed to be an error...
     SomeVal ->
       CmdResp = #cmd_response{
         from_server = country_manager
       , cmd         = Cmd
       , status      = error
-      , reason      = SomeVal
+      , reason      = unrecognised_message
+      , payload     = SomeVal
       },
       record_to_json(cmd_response, CmdResp)
   end,
