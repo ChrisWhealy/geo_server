@@ -7,7 +7,7 @@
 
 -export([
     import_country_info/1
-  , http_get_request/4
+  , http_get_request/3
   , http_head_request/3
   , move_file/4
   , handle_zip_file/4
@@ -42,7 +42,7 @@ import_country_info(ApplicationPid) ->
   ?TRACE("Present working directory is ~s", [PWD]),
 
   %% Download the country info file
-  spawn(?MODULE, http_get_request, [self(), "countryInfo", ".txt", get(trace)]),
+  spawn(?MODULE, http_get_request, [self(), "countryInfo", ".txt"]),
   retry(wait_for_resources(1, text), text, 0),
   
   ApplicationPid ! case parse_countries_file("countryInfo", ".txt") of
@@ -82,9 +82,9 @@ http_head_request(Filename, Ext, Trace) ->
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Always perform a conditional HTTP GET request
 %%
-%% This function is typically spawned, so for debug purposes, it inherits the debug trace setting from its parent
-http_get_request(CallerPid, Filename, Ext, Trace) ->
-  case Trace of
+http_get_request(CallerPid, Filename, Ext) ->
+  %% Read the debug mode setting from the process dictionary of the calling process
+  case read_process_dictionary(CallerPid, trace) of
     true -> put(trace, true);
     _    -> put(trace, false)
   end,
@@ -129,7 +129,7 @@ check_for_update(CountryCode) ->
     true ->
       ?TRACE("Country file ~s.txt is stale.  Checking for new version",[CountryCode]),
       country_manager ! {starting, country_file_download, CountryCode},
-      spawn(?MODULE, http_get_request, [self(), CountryCode, ".zip", get(trace)]),
+      spawn(?MODULE, http_get_request, [self(), CountryCode, ".zip"]),
       retry(wait_for_resources(1, zip), zip, 0);
 
     false -> done
@@ -187,7 +187,7 @@ retry(RetryList, Ext, RetryCount) ->
   receive
   after ?RETRY_WAIT ->
     lists:foreach(fun({F,Ext1}) ->
-        spawn(?MODULE, http_get_request, [Parent, F, Ext1, get(trace)])
+        spawn(?MODULE, http_get_request, [Parent, F, Ext1])
       end,
       RetryList),
     retry(wait_for_resources(length(RetryList), Ext), Ext, RetryCount + 1)
@@ -230,7 +230,6 @@ wait_for_resources(Count, Fun, RetryList) ->
       filelib:ensure_dir(TargetDir),
 
       ?TRACE("Received ~s with ETag ~s",[Filename ++ Ext, Etag]),
-      io:format("Country file ~s data in temp file ~s~n",[Filename, TempFilename]),
       
       %% If an ETag is included in the HTTP response, then write it to disc
       case Etag of

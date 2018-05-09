@@ -243,12 +243,3 @@ wait_for_results(N, Acc) ->
   wait_for_results(N-1, Acc1).
 
 
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Locate a value in the process dictionary of some other process
-read_process_dictionary(Pid, Name) ->
-  {dictionary, Dict} = erlang:process_info(Pid, dictionary),
-  search_dictionary(Name, Dict).
-
-search_dictionary(_,    [])                     -> undefined;
-search_dictionary(Name, [{Name, Value} | _])    -> Value;
-search_dictionary(Name, [{_, _}        | Rest]) -> search_dictionary(Name, Rest).

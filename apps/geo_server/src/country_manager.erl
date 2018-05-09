@@ -269,7 +269,7 @@ wait_for_msgs(CountryServerList) ->
       RequestHandlerPid ! ResponseRec,
       CountryServerList1;
 
-    %% Start all the country servers at once - hopefully, this worn't explode when running in cloud foundry
+    %% Start all the country servers at once
     {cmd, start_all, RequestHandlerPid} when is_pid(RequestHandlerPid) ->
       ?TRACE("Starting all country servers"),
       CountryServerList1 = start_all_country_servers(CountryServerList),

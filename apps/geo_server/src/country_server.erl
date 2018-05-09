@@ -15,20 +15,19 @@
 -include("../include/file_paths.hrl").
 -include("../include/now.hrl").
 
-%% ---------------------------------------------------------------------------------------------------------------------
-%%                                                    P U B L I C   A P I
-%% ---------------------------------------------------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                 P U B L I C   A P I
+%%
+%% =====================================================================================================================
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Initialise the country server
 %% We could be passed either the two character country code as a string, or the name of server as an atom depending on
 %% where the start command came from
-init(CC, Trace) when is_list(CC) ->
-  do_init(list_to_atom("country_server_" ++ string:lowercase(CC)), Trace);
-
-init(CC, Trace) when is_atom(CC) ->
-  do_init(CC, Trace).
+init(CountryCode, Trace) when is_list(CountryCode) -> do_init(CountryCode, Trace);
+init(ServerName,  Trace) when is_atom(ServerName)  -> do_init(extract_cc(ServerName), Trace).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
@@ -67,7 +66,6 @@ start(CC, ServerName, Trace) ->
       distribute_cities(FCP_Data)
   end,
 
-  
   %% Inform country manager that start up is complete
   country_manager ! {started, running, ServerName, get(city_count), ?NOW},
 
@@ -75,17 +73,21 @@ start(CC, ServerName, Trace) ->
 
 
 
-%% ---------------------------------------------------------------------------------------------------------------------
-%%                                               P R I V A T E   A P I
-%% ---------------------------------------------------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                P R I V A T E   A P I
+%%
+%% =====================================================================================================================
+
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Internal startup function
-do_init(ServerName, Trace) ->
+do_init(CC, Trace) ->
+  ServerName = list_to_atom("country_server_" ++ string:lowercase(CC)),
+
   %% Has this country server already been registered?
   case whereis(ServerName) of
     undefined ->
-      CC = extract_cc(ServerName),
       CountryServerPid = spawn_link(?MODULE, start, [CC, ServerName, Trace]),
       register(ServerName, CountryServerPid),
       CountryServerPid;
