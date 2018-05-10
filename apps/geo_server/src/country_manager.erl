@@ -55,10 +55,14 @@ start(CountryList) ->
   % Keep the debug trace flag switched off by default.  Can be switched on from the admin screen
   put(trace, false),
 
-  CountryServerList = initialise_country_server_list(CountryList),
-
   %% The default sort order is by ascending continent name
-  wait_for_msgs(lists:sort(fun(A,B) -> sort_servers_by(continent, B, A) end, CountryServerList)).
+  wait_for_msgs(lists:sort(
+    fun(A,B) ->
+      %% Swap parameters around for sort ascending
+      sort_servers_by(continent, B, A)
+    end,
+    initialise_country_server_list(CountryList))
+  ).
 
 
 
@@ -71,7 +75,9 @@ start(CountryList) ->
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Country manager receive loop
 wait_for_msgs(CountryServerList) ->
-  %% If the CountryServerList is emmpty, then either none of the country servers have started yet, or we are shutting down
+  %% The CountryServerList could be emmpty for two reasons.  Either:
+  %% - none of the country servers have started yet, or
+  %% - the whole country_manager is shutting down
   case CountryServerList of
     [] ->
       %% Are we shutting down?
@@ -88,48 +94,47 @@ wait_for_msgs(CountryServerList) ->
     %% Messages from processes that have crashed
     %%
     {'EXIT', CountryServerPid, Reason} ->
-      case Reason of
+      {NameOrPid, Status, Substatus} = case Reason of
         {stopped, DeadServerName} ->
           io:format("Country server ~p was stopped~n", [DeadServerName]),
-          set_server_status(CountryServerList, DeadServerName, stopped, undefined, 0, [], undefined);
+          {DeadServerName, stopped, undefined};
 
         {no_cities, DeadServerName} ->
           io:format("Country server ~p terminated: no_cities~n", [DeadServerName]),
-          set_server_status(CountryServerList, DeadServerName, stopped, no_cities, 0, [], undefined);
+          {DeadServerName, stopped, no_cities};
 
-        {country_file_error, ReasonStr} ->
-          io:format("Error reading country file ~s~n", [ReasonStr]),
-          set_server_status(CountryServerList, CountryServerPid, crashed, country_file_error, 0, [], undefined);
-
-        {fca_country_file_error, Reason} ->
-          io:format("Error reading internal FCA file. ~p~n", [Reason]),
-          set_server_status(CountryServerList, CountryServerPid, crashed, fca_country_file_error, 0, [], undefined);
+        {country_file_error, Reason} ->
+          io:format("Error reading country file ~s~n", [Reason]),
+          {CountryServerPid, crashed, country_file_error};
 
         {fcp_country_file_error, Reason} ->
           io:format("Error reading internal FCP file. ~p~n", [Reason]),
-          set_server_status(CountryServerList, CountryServerPid, crashed, fcp_country_file_error, 0, [], undefined);
+          {CountryServerPid, crashed, fcp_country_file_error};
 
         {country_zip_file_error, ZipFile, Reason} ->
           io:format("Error unzipping file ~s: ~p~n", [ZipFile, Reason]),
-          set_server_status(CountryServerList, CountryServerPid, crashed, country_zip_file_error, 0, [], undefined);
+          {CountryServerPid, crashed, country_zip_file_error};
 
-        _ ->
+        {retry_limit_exceeded, {CC, Ext}} ->
+          io:format("Retry limit exceeded attempting to download ~s~s~n", [CC, Ext]),
+          {CountryServerPid, crashed, retry_limit_exceeded};
+
+        {error, SomeReason} ->
           DeadServerName = get_server_name_from_pid(CountryServerPid, CountryServerList),
-          io:format("Country server ~p (~p) terminated for reason '~p'~n", [DeadServerName, CountryServerPid, Reason]),
-
-          Reason1 = case Reason of
-            {retry_limit_exceeded, _} -> retry_limit_exceeded;
-            _                         -> see_logs
-          end,
-
-          set_server_status(CountryServerList, CountryServerPid, crashed, Reason1, 0, [], undefined)
-      end;
+          io:format("Country server ~p (~p) terminated for reason '~p'~n", [DeadServerName, CountryServerPid, SomeReason]),
+          {CountryServerPid, crashed, SomeReason}
+      end,
+      
+      set_server_status(CountryServerList, NameOrPid, Status, Substatus, 0, [], undefined);
 
 
     %% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
     %% Messages from country servers reporting the how their startup sequence is progressing
     %%
     %% Initialisation
+    {starting, checking_for_update, CountryCode} ->
+      set_server_status(CountryServerList, ?COUNTRY_SERVER_NAME(CountryCode), starting, checking_for_update, 0, [], undefined);
+    
     {starting, country_file_download, CountryCode} ->
       set_server_status(CountryServerList, ?COUNTRY_SERVER_NAME(CountryCode), starting, country_file_download, 0, [], undefined);
     
@@ -217,13 +222,9 @@ wait_for_msgs(CountryServerList) ->
 
         _Pid ->
           CountryServer ! {cmd, shutdown},
-
-          T  = lists:keyfind(CountryServer, #country_server.name, CountryServerList),
-          T1 = T#country_server{ status = stopped },
-
-          RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, payload = T1},
-
-          lists:keyreplace(CountryServer, #country_server.name, CountryServerList, T1)
+          StoppedSvr = set_server_stopped(lists:keyfind(CountryServer, #country_server.name, CountryServerList)),
+          RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, payload = StoppedSvr},
+          lists:keyreplace(CountryServer, #country_server.name, CountryServerList, StoppedSvr)
       end;
 
 
@@ -275,7 +276,6 @@ wait_for_msgs(CountryServerList) ->
 
       case S#country_server.status of
         crashed ->
-          ?TRACE("Reseting crashed server ~p",[CountryServerName]),
           S1 = reset_crashed_server(S),
           RequestHandlerPid ! #cmd_response{from_server = CountryServerName, cmd = reset, status = ok, payload = S1},
           lists:keyreplace(CountryServerName, #country_server.name, CountryServerList, S1);

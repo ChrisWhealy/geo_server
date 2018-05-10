@@ -109,7 +109,7 @@ record_to_json(cmd_response, Rec) -> kv_to_json(kv_cmd_response_record(Rec));
 %% A country_server record
 record_to_json(country_server, Rec) ->
   %% Format the Erlang specific date time field in the record
-  R1 = Rec#country_server{ started_at = time:format_datetime(Rec#country_server.started_at) },
+  R1 = Rec#country_server{ started_at = format:as_datetime(Rec#country_server.started_at) },
   kv_to_json(kv_country_server_record(R1)).
 
 

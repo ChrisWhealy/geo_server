@@ -55,12 +55,19 @@ start(CC, ServerName, Trace) ->
   filelib:ensure_dir(TargetDir),
   ?TRACE("Starting country server ~s in ~s",[CC, TargetDir]),
 
-  import_files:check_for_update(CC),
-
   %% Read the country file data
-  spawn(country_file_handler, country_file, [CC, self()]),
+  spawn_link(import_files, read_country_file, [CC, self()]),
 
   CityServerList = receive
+    {'EXIT', _, Reason} ->
+      case Reason of
+        {retry_limit_exceeded, [FileDetails | _]} ->
+          exit({retry_limit_exceeded, FileDetails});
+
+        SomethingElse ->
+          exit({error, SomethingElse})
+      end;
+
     {error, Reason} ->
       exit({country_file_error, Reason}),
       [];

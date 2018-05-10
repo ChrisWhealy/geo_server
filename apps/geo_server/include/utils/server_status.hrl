@@ -7,14 +7,16 @@
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Reset a crashed server back to its initial conditions
 reset_crashed_server(Rec) ->
+  io:format("Resetting crashed server ~p~n",[Rec#country_server.name]),
+
   %% Ensure that the country server process really has terminated
   case whereis(Rec#country_server.name) of
     undefined -> ok;
     Pid       -> exit(Pid, reset)
   end,
 
-  %% Change the server's state to stopped
-  Rec#country_server{ status = stopped }.
+  %% Set server's state back to initial
+  set_server_init(Rec#country_server.country_code, Rec#country_server.country_name, Rec#country_server.continent).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
