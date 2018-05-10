@@ -1,9 +1,9 @@
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Transform all known HTTP status codes into a tuple of {Boolean, String}
 %% 
 %% Boolean = Is status code IANA standard?
 %% String  = Text description
-%% -----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 
 
 %% Information 100 -> 199
@@ -104,5 +104,4 @@ http_status_code(598) -> {false, <<"(Informal convention) Network read/connect t
 
 
 %% Unknown status code
-http_status_code(SC) -> {false, << <<"Unknown status code ">>/binary,
-                                   (integer_to_binary(SC))/binary >>}.
+http_status_code(SC) -> {false, list_to_binary([<<"Unknown status code ">>, integer_to_binary(SC)])}.

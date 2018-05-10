@@ -6,18 +6,16 @@
 -created("Date: 2018/04/17 11:43:29").
 -created_by("chris.whealy@sap.com").
 
--export([init/2]).
+-export([
+    init/2
+  ]).
 
-%% Include record definitions first
--include("../include/rec_cmd_response.hrl").
--include("../include/rec_country_server.hrl").
+%% Record definitions
+-include("../include/records/cmd_response.hrl").
+-include("../include/records/country_server.hrl").
 
-
-%% Include various utilities
--include("../include/default_http_response.hrl").
--include("../include/utils_json_transform.hrl").
--include("../include/utils_time.hrl").
--include("../include/utils_format_time.hrl").
+%% Macros
+-include("../include/macros/default_http_response.hrl").
 
 -define(HTTP_GET, <<"GET">>).
 
@@ -61,7 +59,7 @@ init(Req=#{method := ?HTTP_GET}, State) ->
   JsonResp = receive
     %% A general command response tuple
     CmdResponse when is_record(CmdResponse, cmd_response) ->
-      record_to_json(cmd_response, CmdResponse);
+      json:record_to_json(cmd_response, CmdResponse);
 
     %% A country server list
     CountryServerList when is_list(CountryServerList) ->
@@ -69,9 +67,9 @@ init(Req=#{method := ?HTTP_GET}, State) ->
         from_server = country_manager
       , cmd         = binary_to_atom(Cmd, utf8)
       , status      = ok
-      , payload     = make_json_array([ record_to_json(country_server, Svr) || Svr <- CountryServerList ])
+      , payload     = json:make_json_array([ json:record_to_json(country_server, Svr) || Svr <- CountryServerList ])
       },
-      record_to_json(cmd_response, CmdResp);
+      json:record_to_json(cmd_response, CmdResp);
 
     %% Any unrecognised message is assumed to be an error...
     SomeVal ->
@@ -82,7 +80,7 @@ init(Req=#{method := ?HTTP_GET}, State) ->
       , reason      = unrecognised_message
       , payload     = SomeVal
       },
-      record_to_json(cmd_response, CmdResp)
+      json:record_to_json(cmd_response, CmdResp)
   end,
 
   {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, JsonResp, Req), State};

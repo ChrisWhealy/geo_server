@@ -275,7 +275,6 @@ const build_table_columns = country =>
   , htmlElement("td", [TD_ALIGN("right")], country.city_count)
   , htmlElement("td", [TD_ALIGN("right")], length(country.children))
   , htmlElement("td", [TD_ALIGN("right")], format_as_binary_units(country.mem_usage))
-  , htmlElement("td", [TD_ALIGN("right")], format_as_binary_units(country.zip_size))
   , htmlElement("td", [TD_ALIGN("right")], country.started_at)
   , htmlElement("td", [TD_ALIGN("right")], ms_to_seconds(country.startup_time))
   ]
@@ -317,7 +316,6 @@ const build_column_headers = () =>
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('City Count', 'city_count'))
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'City Servers')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('Memory Usage', 'mem_usage'))
-                          , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('ZIP File Size', 'zip_size'))
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], 'Started At')
                           , htmlElement('th', [TH_TEXT_COLOUR("white"), BG_BLUE()], sortable_column('Startup Time', 'startup_time'))
                           ])

@@ -16,14 +16,21 @@
 
 -define(DEFAULT_HTTP_PORT, 8080).
 
--include("../include/file_paths.hrl").
--include("../include/trace.hrl").
+-include("../include/macros/file_paths.hrl").
+-include("../include/macros/trace.hrl").
 
-%% -----------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                 P U B L I C   A P I
+%%
+%% =====================================================================================================================
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Start the geo_server application
-%% -----------------------------------------------------------------------------
 start(_Type, _Args) ->
   process_flag(trap_exit, true),
+
+  %% Keep trace on in order to log server startup
   put(trace, true),
 
   ?TRACE("Application start. Type = ~p, Args =~p",[_Type, _Args]),
@@ -45,14 +52,14 @@ start(_Type, _Args) ->
   ibrowse:start(),
   ibrowse:set_dest(?GEONAMES_HOST, ?GEONAMES_PORT, [?HTTP_PARALLEL_REQ_LIMIT, ?HTTP_REQ_POOL_SIZE]),
 
-  %% If trace mode is on, set iBrowse trace mode on too
+  %% Don't switch iBrowse trace on because it swamps the log files...
   % case get(trace) of
   %   true -> ibrowse:trace_on(?GEONAMES_HOST, ?GEONAMES_PORT);
   %   _    -> ok
   % end,
 
-  %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-	%% Get countryInfo.txt from GeoNames.org
+  %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+	%% Get countryInfo.txt from GeoNames.org and parse it to create a list of {country_code, country_name, continent_code}
   ?TRACE("Importing country information"),
   spawn_link(import_files, import_country_info, [self()]),
 
@@ -64,10 +71,10 @@ start(_Type, _Args) ->
             io:format("Retry limit exceeded downloading ~p~n",[RetryList]);
 
           {parse_error, Reason} ->
-            io:format("Error ~p parsing countryInfo.txt",[Reason]);
+            io:format("Error ~p parsing countryInfo.txt~n",[Reason]);
 
           _ ->
-            io:format("Error ~p received from child proces ~p",[Reason, ChildPid])
+            io:format("Error ~p received from child proces ~p~n",[Reason, ChildPid])
         end,
         
         exit({error, Reason});
@@ -75,12 +82,12 @@ start(_Type, _Args) ->
 			{country_list, L} -> L
     end,
 
-  %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   %% Define routes
   Dispatch = cowboy_router:compile([
 		{'_', [
-      %% Browser interfaces
-      {"/",                    handle_root,                []}
+      %% Browser paths
+       {"/",                    handle_root,                []}
       ,{"/server_status",       handle_server_status,       []}
       ,{"/client_info",         handle_client_info,         []}
       ,{"/search",              handle_search,              []}
@@ -103,10 +110,10 @@ start(_Type, _Args) ->
   ?TRACE("Starting supervisor"),
 	geo_server_sup:start(Countries).
 
-%% -----------------------------------------------------------------------------
+
+
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Stop the geo_server application
-%% -----------------------------------------------------------------------------
-stop(_State) ->
-	geo_server_sup:stop(_State).
+stop(_State) -> geo_server_sup:stop(_State).
 
 

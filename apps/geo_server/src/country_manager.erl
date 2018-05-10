@@ -15,18 +15,16 @@
 -define(RETRY_LIMIT, 3).
 -define(RETRY_WAIT,  5000).
 
-%% Include record definitions first
--include("../include/rec_cmd_response.hrl").
--include("../include/rec_country_server.hrl").
+%% Record definitions
+-include("../include/records/cmd_response.hrl").
+-include("../include/records/country_server.hrl").
 
-%% Include various utilities
--include("../include/trace.hrl").
--include("../include/now.hrl").
--include("../include/utils_time.hrl").
--include("../include/utils_format_time.hrl").
--include("../include/utils_memory_usage.hrl").
--include("../include/utils_json_transform.hrl").
--include("../include/utils_server_status.hrl").
+%% Macro definitions
+-include("../include/macros/trace.hrl").
+-include("../include/macros/now.hrl").
+
+%% Utilities
+-include("../include/utils/server_status.hrl").
 
 
 %% =====================================================================================================================
@@ -38,6 +36,7 @@
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Initialise the country manager
 init(CountryList) ->
+  %% Is the country_manager process already registered?
   case whereis(?MODULE) of
     undefined -> register(?MODULE, spawn(?MODULE, start, [CountryList]));
     _         -> already_registered
@@ -53,15 +52,13 @@ end,
 start(CountryList) ->
   process_flag(trap_exit, true),
 
-  % Debug trace flag starts in the off position.  Can be switched on from the admin screen
+  % Keep the debug trace flag switched off by default.  Can be switched on from the admin screen
   put(trace, false),
 
-  ?TRACE("Starting country manager (~p) with ~w country servers at ~s",[self(), length(CountryList), format_datetime(?NOW)]),
-  CountryServerList  = initialise_country_server_list(CountryList),
-  CountryServerList1 = wait_for_head_responses(fetch_zip_file_sizes(CountryServerList)),
+  CountryServerList = initialise_country_server_list(CountryList),
 
-  %% The default sort order is by descending ZIP size
-  wait_for_msgs(lists:sort(fun(A,B) -> sort_servers_by(zip_size, A, B) end, CountryServerList1)).
+  %% The default sort order is by ascending continent name
+  wait_for_msgs(lists:sort(fun(A,B) -> sort_servers_by(continent, B, A) end, CountryServerList)).
 
 
 
@@ -222,15 +219,7 @@ wait_for_msgs(CountryServerList) ->
           CountryServer ! {cmd, shutdown},
 
           T  = lists:keyfind(CountryServer, #country_server.name, CountryServerList),
-          T1 = #country_server{
-                 name         = T#country_server.name
-               , country_name = T#country_server.country_name
-               , continent    = T#country_server.continent
-               , country_code = T#country_server.country_code
-               , status       = stopped
-               , trace        = T#country_server.trace
-               , zip_size     = T#country_server.zip_size
-               },
+          T1 = T#country_server{ status = stopped },
 
           RequestHandlerPid ! #cmd_response{from_server = country_manager, cmd = shutdown, status = ok, payload = T1},
 
@@ -361,8 +350,7 @@ wait_for_msgs(CountryServerList) ->
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% List servers by status
-started_servers(CountryServerList)  -> filter_by_status(CountryServerList, started).
-starting_servers(CountryServerList) -> filter_by_status(CountryServerList, starting).
+started_servers(CountryServerList) -> filter_by_status(CountryServerList, started).
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Filter server list by status
@@ -386,80 +374,6 @@ end.
 %% Convert the initial list of countries into a list of initialised country_server records with status stopped
 initialise_country_server_list(CountryList) ->
   [ set_server_init(CC, Name, Cont) || {CC, Name, Cont} <- CountryList ].
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Determine the ZIP file sizes for all the countries in the server list
-fetch_zip_file_sizes(CountryServerList) ->
-  lists:foreach(
-    fun(Svr) ->
-      spawn(import_files, http_head_request, [Svr#country_server.country_code, ".zip", get(trace)])
-    end,
-    CountryServerList
-  ),
-
-  CountryServerList.
-
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Wait for HTTP HEAD responses
-wait_for_head_responses(CSList) -> wait_for_head_responses(CSList, [], [], 0).
-
-%% All HEAD responses received and the RetryList is empty
-wait_for_head_responses([], Acc, [], _) -> Acc;
-
-%% Retry limit exceeded
-wait_for_head_responses([], Acc, RetryList, RetryCount) when RetryCount >= ?RETRY_LIMIT ->
-  %% Some HEAD requests just won't work today... This is annoying, but not fatal
-  %% Set the zip file sizes to zero for all the remaining countries
-  Acc ++ [ update_zip_size(Svr, 0) || Svr <- RetryList ];
-
-%% Most of the HEAD responses have been received, but a few failed
-wait_for_head_responses([], Acc, RetryList, RetryCount) ->
-  %% Wait for an arbitrary amount of time before retrying HEAD requests
-  io:format("Retrying HEAD requests for ~w countries~n",[length(RetryList)]),
-
-  receive
-  after ?RETRY_WAIT ->
-    wait_for_head_responses(fetch_zip_file_sizes(RetryList), Acc, [], RetryCount + 1)
-  end;
-
-%% Haven't finished sending off the HEAD requests
-wait_for_head_responses(CSList, Acc, RetryList, RetryCount) ->
-  % ?TRACE("Waiting for HEAD response for ~p remaining countries",[length(CSList)]),
-  
-  {CSList1, Acc1, RetryList1} = receive
-    {Tag, Part2, Filename, Ext} ->
-      %% Find the server to which this message belongs in the CountryServerList
-      Svr = lists:keyfind(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList),
-
-      %% Did the HEAD request succeed?
-      case Tag of
-        % Yup, so in this case Part2 of the message tuple will contain the file's content length
-        ok ->
-          %% Remove the current server from the CSlist, add it to the accumulator, and the RetryList remains unmodified
-          {lists:keydelete(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList),
-           Acc ++ [update_zip_size(Svr, Part2)],
-           RetryList};
-
-        % Nope, so something went wrong with the HEAD request
-        error ->
-          %% Write error message to the console
-          case Part2 of
-            {status_code, StatusCode} -> io:format("Received HTTP status code ~w when requesting content length of ~s~s~n",[StatusCode, Filename, Ext]);
-            {other, Reason}           -> io:format("Unable to determine ZIP file size for ~s~s. Reason: ~p~n",[Filename, Ext, Reason])
-          end,
-
-          %% Remove the current server from the CSlist, the accumulator remains unmodieid, and the failed server is
-          %% added to the RetryList
-          {lists:keydelete(?COUNTRY_SERVER_NAME(Filename), #country_server.name, CSList),
-           Acc,
-           RetryList ++ [Svr]}
-      end
-  end,
-
-  wait_for_head_responses(CSList1, Acc1, RetryList1, RetryCount).
-
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Start all country servers
@@ -501,6 +415,7 @@ trace_state_to_boolean(trace_on)  -> true;
 trace_state_to_boolean(trace_off) -> false.
 
 
+
 %% =====================================================================================================================
 %%
 %%                                    S O R T   S E R V E R   S T A T U S   L I S T
@@ -509,15 +424,22 @@ trace_state_to_boolean(trace_off) -> false.
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Sort server status records by various column headings
-sort_servers_by(continent,    A, B) -> simple_sort(A#country_server.continent,    B#country_server.continent);
+%%
+%% Sorting by continent implies sorting by country_name within continent
+sort_servers_by(continent, A, B) -> 
+  case A#country_server.continent == B#country_server.continent of
+    true  -> A#country_server.country_name > B#country_server.country_name;
+    false -> A#country_server.continent    > B#country_server.continent
+  end;
+
 sort_servers_by(country_name, A, B) -> simple_sort(A#country_server.country_name, B#country_server.country_name);
 sort_servers_by(country_code, A, B) -> simple_sort(A#country_server.country_code, B#country_server.country_code);
 sort_servers_by(city_count,   A, B) -> simple_sort(A#country_server.city_count,   B#country_server.city_count);
 sort_servers_by(mem_usage,    A, B) -> simple_sort(A#country_server.mem_usage,    B#country_server.mem_usage);
-sort_servers_by(zip_size,     A, B) -> simple_sort(A#country_server.zip_size,     B#country_server.zip_size);
 sort_servers_by(startup_time, A, B) -> simple_sort(A#country_server.startup_time, B#country_server.startup_time).
 
-%% By default, all atoms are greater than integers. Need to reverse this.
+%% By default, all atoms are greater than integers. So, since some fields might contain the atom 'undefined' we need to
+%% override the default sort order
 simple_sort(A, _) when is_atom(A) -> false;
 simple_sort(_, B) when is_atom(B) -> true;
 simple_sort(A, B)                 -> A > B.

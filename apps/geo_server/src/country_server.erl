@@ -10,10 +10,13 @@
   , start/3
 ]).
 
--include("../include/trace.hrl").
--include("../include/rec_geoname.hrl").
--include("../include/file_paths.hrl").
--include("../include/now.hrl").
+%% Records
+-include("../include/records/geoname.hrl").
+
+%% Macros
+-include("../include/macros/trace.hrl").
+-include("../include/macros/file_paths.hrl").
+-include("../include/macros/now.hrl").
 
 %% =====================================================================================================================
 %%

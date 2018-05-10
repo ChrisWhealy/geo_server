@@ -6,22 +6,19 @@
 -created("Date: 2018/04/06 14:52:17").
 -created_by("chris.whealy@sap.com").
 
--export([init/2]).
+-export([
+    init/2
+  ]).
 
-%% Include record definitions first
--include("../include/rec_cmd_response.hrl").
--include("../include/rec_country_server.hrl").
+%% Record definitions
+-include("../include/records/cmd_response.hrl").
 
+%% Macros
+-include("../include/macros/trace.hrl").
+-include("../include/macros/default_http_response.hrl").
 
-%% Include variuous utilities
--include("../include/trace.hrl").
--include("../include/default_http_response.hrl").
--include("../include/utils_json_transform.hrl").
--include("../include/utils_time.hrl").
--include("../include/utils_format_time.hrl").
 
 -define(HTTP_GET, <<"GET">>).
-
 -define(COUNTRY_SERVER_NAME(CC), list_to_atom("country_server_" ++ string:lowercase(binary_to_list(CC)))).
 
 %% =====================================================================================================================
@@ -50,7 +47,7 @@ init(Req=#{method := ?HTTP_GET}, State) ->
   JsonResp = receive
     %% A general command response tuple
     CmdResponse when is_record(CmdResponse, cmd_response) ->
-      record_to_json(cmd_response, CmdResponse);
+      json:record_to_json(cmd_response, CmdResponse);
 
     %% Any unrecognised message is assumed to be an error
     SomeVal ->
@@ -62,7 +59,7 @@ init(Req=#{method := ?HTTP_GET}, State) ->
       , payload     = SomeVal
       },
 
-      record_to_json(cmd_response, CmdResp)
+      json:record_to_json(cmd_response, CmdResp)
   end,
 
   {ok, cowboy_req:reply(200, ?CONTENT_TYPE_JSON, JsonResp, Req), State};

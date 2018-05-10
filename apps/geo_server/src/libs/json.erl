@@ -1,3 +1,22 @@
+-module(json).
+
+-author("Chris Whealy <chris.whealy@sap.com>").
+-revision("Revision: 1.0.0").
+-created("Date: 2018/05/09 16:07:45").
+-created_by("chris.whealy@sap.com").
+
+-export([
+    record_to_json/2
+  , make_json_array/1
+  , make_json_prop/2
+  , make_json_obj/1
+]).
+
+
+%% Record definitions
+-include("../include/records/cmd_response.hrl").
+-include("../include/records/country_server.hrl").
+
 %% =====================================================================================================================
 %%
 %%                                       J S O N   T R A N S F O R M A T I O N S
@@ -57,7 +76,7 @@ make_json_obj(Prop)                      -> list_to_binary([<<"{">>, Prop, <<"}"
 
 %% =====================================================================================================================
 %%
-%% Convert various records into a simple JSON object
+%% Convert various records into simple JSON objects
 %%
 %% =====================================================================================================================
 
@@ -90,7 +109,7 @@ record_to_json(cmd_response, Rec) -> kv_to_json(kv_cmd_response_record(Rec));
 %% A country_server record
 record_to_json(country_server, Rec) ->
   %% Format the Erlang specific date time field in the record
-  R1 = Rec#country_server{ started_at = format_datetime(Rec#country_server.started_at) },
+  R1 = Rec#country_server{ started_at = time:format_datetime(Rec#country_server.started_at) },
   kv_to_json(kv_country_server_record(R1)).
 
 

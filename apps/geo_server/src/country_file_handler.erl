@@ -9,10 +9,10 @@
     country_file/2
   ]).
 
--include("../include/trace.hrl").
--include("../include/utils_format_binary.hrl").
--include("../include/file_paths.hrl").
--include("../include/rec_geoname.hrl").
+-include("../include/records/geoname.hrl").
+
+-include("../include/macros/trace.hrl").
+-include("../include/macros/file_paths.hrl").
 
 -define(PROGRESS_FRACTION, 0.01).
 
@@ -33,7 +33,7 @@ country_file(CC, CountryServerPid) when is_pid(CountryServerPid) ->
   {registered_name, CountryServerName} = erlang:process_info(CountryServerPid, registered_name),
 
   put(my_name, CountryServerName),
-  put(trace, read_process_dictionary(CountryServerPid, trace)),
+  put(trace, process_tools:read_process_dictionary(CountryServerPid, trace)),
 
   country_file_int(CC, filelib:file_size(?COUNTRY_FILE_FCP(CC)), CountryServerPid).
 
@@ -57,12 +57,12 @@ country_file_int(CC, {error, Reason}, _) ->
 %% file and generate a new FCP.txt file
 country_file_int(CC, 0, CountryServerPid) when is_pid(CountryServerPid) ->
   Filesize = filelib:file_size(?COUNTRY_FILE_FULL(CC)),
-  ?TRACE("Internal FCP file does not exist. Importing ~s from full country file ~s", [format_as_binary_units(Filesize), ?COUNTRY_FILE_FULL(CC)]),
+  ?TRACE("Internal FCP file does not exist. Importing ~s from full country file ~s", [format:as_binary_units(Filesize), ?COUNTRY_FILE_FULL(CC)]),
   CountryServerPid ! country_file_int(CC, file:open(?COUNTRY_FILE_FULL(CC), [read]), Filesize);
 
 %% Import the internal <CC>_fcp.txt file
 country_file_int(CC, FCP_Filesize, CountryServerPid) when is_pid(CountryServerPid) ->
-  ?TRACE("Importing ~s from internal FCP country file ~s",[format_as_binary_units(FCP_Filesize), ?COUNTRY_FILE_FCP(CC)]),
+  ?TRACE("Importing ~s from internal FCP country file ~s",[format:as_binary_units(FCP_Filesize), ?COUNTRY_FILE_FCP(CC)]),
   {ok, [FCP_Data | _]} = file:consult(?COUNTRY_FILE_FCP(CC)),
   CountryServerPid ! FCP_Data.
 

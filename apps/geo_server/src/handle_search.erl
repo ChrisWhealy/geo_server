@@ -8,12 +8,15 @@
 
 -export([init/2]).
 
--include("../include/trace.hrl").
--include("../include/rec_geoname.hrl").
--include("../include/rec_country_server.hrl").
+%% Records
+-include("../include/records/geoname.hrl").
+-include("../include/records/country_server.hrl").
+
+%% Macros
+-include("../include/macros/trace.hrl").
+
 
 -define(SERVER_NAME(Cc), list_to_atom("country_server_" ++ string:lowercase(Cc))).
-
 -define(QS_PARAMETERS, [search_term, whole_word, starts_with]).
 
 %% ---------------------------------------------------------------------------------------------------------------------

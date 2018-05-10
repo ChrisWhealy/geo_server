@@ -14,15 +14,19 @@
   , check_for_update/1
 ]).
 
--include("../include/trace.hrl").
--include("../include/http_status_codes.hrl").
--include("../include/file_paths.hrl").
--include("../include/now.hrl").
--include("../include/utils_time.hrl").
+%% Macros
+-include("../include/macros/trace.hrl").
+-include("../include/macros/file_paths.hrl").
+-include("../include/macros/now.hrl").
 
--define(STALE_AFTER, 86400).
+-define(ONE_DAY,     60 * 60 * 24).
+-define(STALE_AFTER, ?ONE_DAY).
 -define(RETRY_WAIT,  5000).
 -define(RETRY_LIMIT, 3).
+
+%% Utilities
+-include("../include/utils/http_status_codes.hrl").
+
 
 
 %% =====================================================================================================================
@@ -84,7 +88,7 @@ http_head_request(Filename, Ext, Trace) ->
 %%
 http_get_request(CallerPid, Filename, Ext) ->
   %% Read the debug mode setting from the process dictionary of the calling process
-  case read_process_dictionary(CallerPid, trace) of
+  case process_tools:read_process_dictionary(CallerPid, trace) of
     true -> put(trace, true);
     _    -> put(trace, false)
   end,
@@ -159,12 +163,6 @@ write_file(FQFilename, Content) ->
     {error, Reason} -> io:format("Writing file ~s failed. ~p~n",[FQFilename, Reason])
   end.
 
-write_file(Dir, Filename, Ext, Content) ->
-  case file:write_file(Dir ++ Filename ++ Ext, Content) of
-    ok              -> ok;
-    {error, Reason} -> io:format("Writing file ~s failed. ~p~n",[Dir ++ Filename ++ Ext, Reason])
-  end.
-
 
 
 %% =====================================================================================================================
@@ -213,7 +211,7 @@ file_age(Filename) ->
 
   %% Find time difference between the file's last modified time and now
   %% Convert standard DateTime to custom DateTime format by adding microseconds
-  time_diff(?NOW, {Date,{H,M,S,0}}).
+  time:time_diff(?NOW, {Date,{H,M,S,0}}).
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Wait for 'Count' HTTP resource to be returned
@@ -280,8 +278,7 @@ parse_countries_file({error, Reason}) -> {error, Reason}.
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
-%% Read the countries file and create a list of country codes skipping any lines that import_country_info with a hash
-%% character
+%% Read the countries file and create a list of country codes skipping any lines that start with a hash character
 read_countries_file(IoDevice, []) ->
   read_countries_file(IoDevice, io:get_line(IoDevice,""), []).
 
@@ -297,8 +294,9 @@ read_countries_file(IoDevice, DataLine, Acc) ->
 %% Extract ISO country code, country name and continent code
 %% These are the 1st, 5th and 9th columns of countryInfo.txt
 get_country_info($#,_Tokens, Acc) -> Acc;
-get_country_info(_,  Tokens, Acc) ->
-  lists:append(Acc, [{lists:nth(1,Tokens), lists:nth(5,Tokens), lists:nth(9,Tokens)}]).
+get_country_info(_,  Tokens, Acc) -> lists:append(Acc, [{lists:nth(1,Tokens)
+                                                       , lists:nth(5,Tokens)
+                                                       , lists:nth(9,Tokens)}]).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------

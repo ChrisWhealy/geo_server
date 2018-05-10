@@ -1,13 +1,12 @@
-%% ----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 %% Standard HTTP response information
-%% ----------------------------------------------------------------------------
+%% ---------------------------------------------------------------------------------------------------------------------
 -define(HTTP_STATUS_OK,                 200).
 -define(HTTP_STATUS_METHOD_NOT_ALLOWED, 405).
 
 -define(HTTP_PERMITTED_METHODS, #{<<"allow">> => <<"GET">>}).
 
 -define(CONTENT_TYPE_PLAIN_TEXT, #{<<"content-type">> => <<"text/plain">>}).
--define(CONTENT_TYPE_HTML,       #{<<"content-type">> => <<"text/html; charset=utf-8">>}).
 -define(CONTENT_TYPE_JSON,       #{<<"content-type">> => <<"text/json">>}).
 
 -define(SERVER_RUNNING, <<"geo_server is running">>).

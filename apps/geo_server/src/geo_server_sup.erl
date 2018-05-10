@@ -12,29 +12,51 @@
  , init/1
 ]).
 
--include("../include/trace.hrl").
+-include("../include/macros/trace.hrl").
 
 -define(RESTART_STRATEGY, one_for_one).
 -define(INTENSITY, 1).
 -define(PERIOD, 5).
 
--define(SUP_FLAGS, {?RESTART_STRATEGY, ?INTENSITY, ?PERIOD}).
+-define(SUPERVISOR_FLAGS, {?RESTART_STRATEGY, ?INTENSITY, ?PERIOD}).
 
-%% -----------------------------------------------------------------------------
-%% Server callbacks
-%% -----------------------------------------------------------------------------
+%% =====================================================================================================================
+%%
+%%                                                 P U B L I C   A P I
+%%
+%% =====================================================================================================================
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Start server
 start(Countries) ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, Countries).
 
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Initialise server
 init(Countries) ->
-  % Trace flow
+  %% Keep trace on in order to log server startup
   put(trace, true),
 
   ?TRACE("Supervisor initialising country_manager with ~p countries",[length(Countries)]),
-  {ok, {?SUP_FLAGS, [ {country_manager, {country_manager, init, [Countries]}, permanent, brutal_kill, supervisor, [country_manager]} ]
-       }
+  { ok
+  , { ?SUPERVISOR_FLAGS
+    , [ { country_manager
+        , { country_manager
+          , init, [Countries]
+          }
+        , permanent
+        , brutal_kill
+        , supervisor
+        , [country_manager]
+        }
+      ]
+    }
   }.
 
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Stop server
 stop(_State) ->
   ?TRACE("Supervisor shutting down"),
 

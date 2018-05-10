@@ -8,17 +8,13 @@
 
 -export([init/2]).
 
-%% Include record definitions first
--include("../include/rec_cmd_response.hrl").
--include("../include/rec_country_server.hrl").
+%% Records
+-include("../include/records/cmd_response.hrl").
+-include("../include/records/country_server.hrl").
 
+%% Macros
+-include("../include/macros/default_http_response.hrl").
 
-%% Include various utilities
--include("../include/default_http_response.hrl").
--include("../include/utils_format_binary.hrl").
--include("../include/utils_json_transform.hrl").
--include("../include/utils_time.hrl").
--include("../include/utils_format_time.hrl").
 
 -define(HTTP_GET, <<"GET">>).
 
@@ -53,10 +49,10 @@ init(Req, _State) ->
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Format server status list
 server_status_details(ServerStatusList, Trace) ->
-  CountryManagerTrace = make_json_prop(country_manager_trace, Trace),
-  MemoryUsage         = make_json_prop(erlang_memory_usage,   format_as_binary_units(erlang:memory(total))),
+  CountryManagerTrace = json:make_json_prop(country_manager_trace, Trace),
+  MemoryUsage         = json:make_json_prop(erlang_memory_usage,   format:as_binary_units(erlang:memory(total))),
 
-  Servers = make_json_prop(servers, make_json_array([ record_to_json(country_server, S) || S <- ServerStatusList ])),
+  Servers = json:make_json_prop(servers, json:make_json_array([ json:record_to_json(country_server, S) || S <- ServerStatusList ])),
 
-  make_json_obj([CountryManagerTrace, MemoryUsage, Servers]).
+  json:make_json_obj([CountryManagerTrace, MemoryUsage, Servers]).
 
