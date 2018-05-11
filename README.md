@@ -110,7 +110,7 @@ After deployment to Cloud Foundry, by default, none of the country servers are s
 
 In order to start one or more country servers, you must use the `geo-server` admin interface.  This is accessed by adding `/server_info` to `geo-server`'s deployed URL.
 
-![Admin Interface During Startup](./docs/Admin Interface.png)
+![Admin Interface During Startup](./docs/Admin%20Interface.png "Admin Interface During Startup")
 
 Currently, no authentication is required to access this page.
 
