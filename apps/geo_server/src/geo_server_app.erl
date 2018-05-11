@@ -11,9 +11,6 @@
 	, stop/1
 ]).
 
--define(HTTP_PARALLEL_REQ_LIMIT, {max_sessions,      10}).
--define(HTTP_REQ_POOL_SIZE,      {max_pipeline_size, 25}).
-
 -define(DEFAULT_HTTP_PORT, 8080).
 
 -include("../include/macros/file_paths.hrl").
@@ -35,7 +32,7 @@ start(_Type, _Args) ->
 
   ?TRACE("Application start. Type = ~p, Args =~p",[_Type, _Args]),
   
-	%% Get port number from the environment
+	%% Get port number from the environment for incoming HTTP requests
   Port = case os:getenv("PORT") of
     false ->
       ?TRACE("Environment variable PORT not set.  Defaulting to ~w",[?DEFAULT_HTTP_PORT]),
@@ -46,11 +43,16 @@ start(_Type, _Args) ->
       Int
   end,
 
+  %% Determine if external communication needs to take place through a proxy server
+  ProxyInfo = get_proxy_info(),
+  ?TRACE("Proxy information = ~p",[ProxyInfo]),
 
-  %% Start iBrowse and set parallel connection limit
+  %% Start iBrowse and set connection parameters
   ?TRACE("Starting iBrowse"),
   ibrowse:start(),
-  ibrowse:set_dest(?GEONAMES_HOST, ?GEONAMES_PORT, [?HTTP_PARALLEL_REQ_LIMIT, ?HTTP_REQ_POOL_SIZE]),
+  ibrowse:set_dest(?GEONAMES_HOST, ?GEONAMES_PORT, []),
+  ibrowse:set_max_sessions(?GEONAMES_HOST, ?GEONAMES_PORT, 10),
+  ibrowse:set_max_pipeline_size(?GEONAMES_HOST, ?GEONAMES_PORT, 25),
 
   %% Don't switch iBrowse trace on because it swamps the log files...
   % case get(trace) of
@@ -61,7 +63,7 @@ start(_Type, _Args) ->
   %% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 	%% Get countryInfo.txt from GeoNames.org and parse it to create a list of {country_code, country_name, continent_code}
   ?TRACE("Importing country information"),
-  spawn_link(import_files, import_country_info, [self()]),
+  spawn_link(import_files, import_country_info, [self(), ProxyInfo]),
 
   Countries =
 		receive
@@ -108,7 +110,7 @@ start(_Type, _Args) ->
   cowboy:start_clear(my_http_listener, [{port, Port}], #{env => #{dispatch => Dispatch}}),
 
   ?TRACE("Starting supervisor"),
-	geo_server_sup:start(Countries).
+	geo_server_sup:start(Countries, ProxyInfo).
 
 
 
@@ -117,3 +119,61 @@ start(_Type, _Args) ->
 stop(_State) -> geo_server_sup:stop(_State).
 
 
+
+%% =====================================================================================================================
+%%
+%%                                                P R I V A T E   A P I
+%%
+%% =====================================================================================================================
+
+%% ---------------------------------------------------------------------------------------------------------------------
+%% If available, obtain HTTP proxy information from the environment.
+%% Returns a tuple of {Host, Port} or {undefined, undefined}
+get_proxy_info() ->
+  Proxy1 = os:getenv("HTTP_PROXY"),
+  Proxy2 = os:getenv("http_proxy"),
+  
+  %% Has the uppercase version of this variable been set?
+  {Host, Port} = case Proxy1 of
+    false ->
+      %% Nope, so check for the lowercase version of the same variable
+      case Proxy2 of
+        %% Nope, so we assume that no proxy has been set
+        false ->
+          {undefined, undefined};
+          
+          %% Parse lowercase proxy string to find host and port number
+        _ ->
+          split_proxy_str(Proxy2)
+      end;
+      
+      %% Parse uppercase proxy string to find host and post number
+    _ ->
+      split_proxy_str(Proxy1)
+  end,
+  
+  {{proxy_host, Host}, {proxy_port, Port}}.
+
+%% ---------------------------------------------------------------------------------------------------------------------
+split_proxy_str(ProxyStr) ->
+  Parts = string:split(ProxyStr, ":", all),
+
+  {Host, PortStr} = case length(Parts) of
+    3 ->
+      [_Prot, Hst | Prt ] = Parts,
+      {_, Hst1} = lists:split(2,Hst),
+      {Hst1, Prt};
+
+    2 ->
+      [Hst | Prt] = Parts,
+      {Hst, Prt}
+  end,
+  
+  Port = case PortStr of
+    [] -> 8080;
+    _  -> list_to_integer(hd(PortStr))
+  end,
+
+  {Host, Port}.
+
+    

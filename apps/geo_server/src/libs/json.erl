@@ -12,20 +12,21 @@
   , make_json_obj/1
 ]).
 
-
 %% Record definitions
--include("../include/records/cmd_response.hrl").
--include("../include/records/country_server.hrl").
+-include("../../include/records/cmd_response.hrl").
+-include("../../include/records/country_server.hrl").
+
+-define(DBL_QUOTE,     <<"\"">>).
+-define(OPEN_BRACKET,  <<"[">>).
+-define(CLOSE_BRACKET, <<"]">>).
+-define(EMPTY_ARRAY,   <<"[]">>).
+-define(OPEN_CURLY,    <<"{">>).
+-define(CLOSE_CURLY,   <<"}">>).
 
 %% =====================================================================================================================
 %%
 %%                                       J S O N   T R A N S F O R M A T I O N S
 %%
-%% =====================================================================================================================
-
-
-%% =====================================================================================================================
-%% Convert various datatypes to JavaScript-ready binary strings
 %% =====================================================================================================================
 
 %% ---------------------------------------------------------------------------------------------------------------------
@@ -40,8 +41,8 @@ as_binary(V) when is_binary(V) -> V;
 %% Numbers do not need to be delimited
 as_binary(V) when is_integer(V); is_float(V) -> list_to_binary(io_lib:format("~p",[V]));
 
-as_binary(V) when is_atom(V) -> list_to_binary([<<"\"">>, atom_to_list(V), <<"\"">>]);
-as_binary(V) when is_pid(V)  -> list_to_binary([<<"\"">>, pid_to_list(V), <<"\"">>]);
+as_binary(V) when is_atom(V) -> list_to_binary([?DBL_QUOTE, atom_to_list(V), ?DBL_QUOTE]);
+as_binary(V) when is_pid(V)  -> list_to_binary([?DBL_QUOTE, pid_to_list(V),  ?DBL_QUOTE]);
 
 %% For strings, io_lib:format adds double quotes automatically
 as_binary(V) -> list_to_binary(lists:flatten(io_lib:format("~p",[V]))).
@@ -55,9 +56,9 @@ as_binary(V) -> list_to_binary(lists:flatten(io_lib:format("~p",[V]))).
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Make a JSON array from the supplied list of values
 %% Each element in Vs must be quote delimited string, object or another array
-make_json_array([])                  -> <<"[]">>;
-make_json_array(Vs) when is_list(Vs) -> list_to_binary([<<"[">>, lists:join(<<",">>,Vs), <<"]">>]);
-make_json_array(V)                   -> list_to_binary([<<"[">>, V,                      <<"]">>]).
+make_json_array([])                  -> ?EMPTY_ARRAY;
+make_json_array(Vs) when is_list(Vs) -> list_to_binary([?OPEN_BRACKET, lists:join(<<",">>,Vs), ?CLOSE_BRACKET]);
+make_json_array(V)                   -> list_to_binary([?OPEN_BRACKET, V,                      ?CLOSE_BRACKET]).
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Make a JSON property from the supplied name and value
@@ -69,8 +70,8 @@ make_json_prop(PropName, PropValue) -> list_to_binary(lists:flatten([as_binary(P
 %% Each property must already be in the form <<"\"prop_name\":"\value\"">>
 make_json_obj([]) -> <<"{}">>;
 
-make_json_obj(Props) when is_list(Props) -> list_to_binary([<<"{">>, lists:flatten(lists:join(<<",">>, Props)), <<"}">>]);
-make_json_obj(Prop)                      -> list_to_binary([<<"{">>, Prop, <<"}">>]).
+make_json_obj(Props) when is_list(Props) -> list_to_binary([?OPEN_CURLY, lists:flatten(lists:join(<<",">>, Props)), ?CLOSE_CURLY]);
+make_json_obj(Prop)                      -> list_to_binary([?OPEN_CURLY, Prop,                                      ?CLOSE_CURLY]).
 
 
 

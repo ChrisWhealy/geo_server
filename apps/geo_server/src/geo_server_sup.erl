@@ -7,7 +7,7 @@
 -created_by("chris.whealy@sap.com").
 
 -export([
-   start/1
+   start/2
  , stop/1
  , init/1
 ]).
@@ -28,13 +28,13 @@
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Start server
-start(Countries) ->
-  supervisor:start_link({local, ?MODULE}, ?MODULE, Countries).
+start(Countries, ProxyInfo) ->
+  supervisor:start_link({local, ?MODULE}, ?MODULE, {Countries, ProxyInfo}).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Initialise server
-init(Countries) ->
+init({Countries, ProxyInfo}) ->
   %% Keep trace on in order to log server startup
   put(trace, true),
 
@@ -43,7 +43,8 @@ init(Countries) ->
   , { ?SUPERVISOR_FLAGS
     , [ { country_manager
         , { country_manager
-          , init, [Countries]
+          , init
+          , [Countries, ProxyInfo]
           }
         , permanent
         , brutal_kill

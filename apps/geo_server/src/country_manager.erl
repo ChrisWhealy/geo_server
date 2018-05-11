@@ -6,8 +6,8 @@
 -created_by("chris.whealy@sap.com").
 
 -export([
-    init/1
-  , start/1
+    init/2
+  , start/2
 ]).
 
 %% Put -defines before -includes because COUNTRY_SERVER_NAME is needed in manage_server_status.hrl
@@ -35,10 +35,10 @@
 
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Initialise the country manager
-init(CountryList) ->
+init(CountryList, ProxyInfo) ->
   %% Is the country_manager process already registered?
   case whereis(?MODULE) of
-    undefined -> register(?MODULE, spawn(?MODULE, start, [CountryList]));
+    undefined -> register(?MODULE, spawn(?MODULE, start, [CountryList, ProxyInfo]));
     _         -> already_registered
 end,
 
@@ -49,11 +49,15 @@ end,
 %% Start the country manager
 %%
 %% This process is responsible for starting and then managing each of the individual country servers
-start(CountryList) ->
+start(CountryList, {ProxyHost, ProxyPort}) ->
   process_flag(trap_exit, true),
 
-  % Keep the debug trace flag switched off by default.  Can be switched on from the admin screen
+  %% Keep the debug trace flag switched off by default.  Can be switched on from the admin screen
   put(trace, false),
+
+  %% Store the proxy information in the process dictionary
+  put(proxy_host, ProxyHost),
+  put(proxy_port, ProxyPort),
 
   %% The default sort order is by ascending continent name
   wait_for_msgs(lists:sort(

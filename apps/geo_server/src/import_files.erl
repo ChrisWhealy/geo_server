@@ -6,10 +6,9 @@
 -created_by("chris.whealy@sap.com").
 
 -export([
-    import_country_info/1
+    import_country_info/2
   , read_country_file/2
   , http_get_request/3
-  , http_head_request/3
   , move_file/4
   , handle_zip_file/4
 ]).
@@ -52,9 +51,13 @@
 %% ---------------------------------------------------------------------------------------------------------------------
 %% Import the country info file to create a list of {country_code, country_name, continent}
 %% Send this list back to the top level application
-import_country_info(ApplicationPid) -> 
+import_country_info(ApplicationPid, {ProxyHost, ProxyPort}) ->
   %% Debug trace output
   put(trace, true),
+
+  %% Store proxy information in the process dictionary
+  put(proxy_host, ProxyHost),
+  put(proxy_port, ProxyPort),
 
   {ok, PWD} = file:get_cwd(),
   ?TRACE("Present working directory is ~s", [PWD]),
@@ -77,50 +80,28 @@ read_country_file(CC, CountryServerPid) when is_pid(CountryServerPid) ->
   put(my_name, CountryServerName),
   put(trace, process_tools:read_process_dictionary(CountryServerPid, trace)),
   
+  %% Get the proxy information from the process dictionary of the country_manager
+  put(proxy_host, process_tools:read_process_dictionary(whereis(country_manager), proxy_host)),
+  put(proxy_port, process_tools:read_process_dictionary(whereis(country_manager), proxy_port)),
+
   check_for_update(CC),
   read_country_file_int(CC, filelib:file_size(?COUNTRY_FILE_FCP(CC)), CountryServerPid).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
-%% HTTP HEAD request
-%%
-%% Used to discover a country's ZIP file size
-http_head_request(Filename, Ext, Trace) ->
-  case Trace of
-    true -> put(trace, true);
-    _    -> put(trace, false)
-  end,
-
-  Url = ?GEONAMES_URL ++ Filename ++ Ext,
-
-  %% Send off the HEAD request, and fire the response back to the country_manager
-  country_manager ! case ibrowse:send_req(Url, [], head) of
-    {ok, StatusCode, Hdrs, _Body} ->
-      % ?TRACE("HTTP ~s for HEAD request to ~s",[StatusCode, Url]),
-
-      case StatusCode of
-        "200" -> {ok, get_content_length(Hdrs), Filename, Ext};
-        _     -> {error, {status_code, string:to_integer(StatusCode)}, Filename, Ext}
-      end;
-
-    {error, Reason} ->
-      ?TRACE("Error ~p for ~s",[Reason, Url]),
-      {error, {other, Reason}, Filename, Ext}
-  end.
-    
-
-%% ---------------------------------------------------------------------------------------------------------------------
 %% Always perform a conditional HTTP GET request
 %%
 http_get_request(CallerPid, Filename, Ext) ->
+  Url = ?GEONAMES_URL ++ Filename ++ Ext,
+
   %% Read the debug mode setting from the process dictionary of the calling process
   case process_tools:read_process_dictionary(CallerPid, trace) of
     true -> put(trace, true);
     _    -> put(trace, false)
   end,
 
-  Url     = ?GEONAMES_URL ++ Filename ++ Ext,
-  Options = [{save_response_to_file, true}],
+  %% Define HTTP GET request options
+  Options = define_http_options(CallerPid),
 
   %% Check to see if we have an ETag for this file
   Response = case read_etag_file(Filename) of
@@ -339,13 +320,6 @@ get_etag([])                    -> missing;
 get_etag([{"ETag", Etag} | _])  -> Etag;
 get_etag([{"etag", Etag} | _])  -> Etag;
 get_etag([{_Hdr, _Val} | Rest]) -> get_etag(Rest).
-
-%% ---------------------------------------------------------------------------------------------------------------------
-%% Extract content-length from HTTP headers
-get_content_length([])                                      -> missing;
-get_content_length([{"Content-Length", ContentLength} | _]) -> list_to_integer(ContentLength);
-get_content_length([{"content-length", ContentLength} | _]) -> list_to_integer(ContentLength);
-get_content_length([{_Hdr, _Val} | Rest])                   -> get_content_length(Rest).
 
 
 %% ---------------------------------------------------------------------------------------------------------------------
@@ -574,10 +548,43 @@ supplement_fcp_admin_text(HierarchyServer, FCP) ->
 wait_for_results(0, Acc) -> Acc;
 wait_for_results(N, Acc) ->
   Acc1 = Acc ++ receive
-    FCPRec when is_record(FCPRec, geoname_int) -> [FCPRec];
-    _Whatever                                  -> []
-  end,
+FCPRec when is_record(FCPRec, geoname_int) -> [FCPRec];
+_Whatever                                  -> []
+end,
 
-  wait_for_results(N-1, Acc1).
+wait_for_results(N-1, Acc1).
 
 
+%% ---------------------------------------------------------------------------------------------------------------------
+%% Define HTTP options
+define_http_options(CallerPid) ->
+  %% Ensure HTTP response is written directly to file
+  Options1 = [{save_response_to_file, true}],
+
+  %% Get the proxy information from the process dictionary of the calling process
+  %%
+  %% The proxy host value must be a tuple of {proxy_host, HostName}
+  %% The proxy port value must be a tuple of {proxy_port, PortNumber}
+  Options2 = Options1 ++
+    case process_tools:read_process_dictionary(CallerPid, proxy_host) of
+      undefined -> [];
+
+      {proxy_host, ProxyHost} ->
+        case ProxyHost of
+          undefined -> [];
+          _         -> [{proxy_host, ProxyHost}]
+        end
+    end,
+
+  Options3 = Options2 ++
+    case process_tools:read_process_dictionary(CallerPid, proxy_port) of
+      undefined -> [];
+
+      {proxy_port, ProxyPort} ->
+        case ProxyPort of
+          undefined -> [];
+          _         -> [{proxy_port, ProxyPort}]
+        end
+    end,
+
+  Options3.
